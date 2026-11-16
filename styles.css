@@ -528,7 +528,19 @@ svg text.chart-annot, svg text.chart-annot tspan {
 .tab-btn:hover:not(.active) { color: var(--ink); }
 
 .tab-pane { display: none; padding: 36px 36px; }
-.tab-pane.active { display: block; }
+.tab-pane.active { display: block; opacity: 1; }
+/* Opacity alone, deliberately. These panes hold charts that measure
+   themselves as they render, so shifting the pane under them is a fight
+   waiting to happen.
+   And the incoming pane only. display is not transitioned here, unlike the
+   party drawer: panes are siblings in normal flow, so holding the outgoing
+   one at display:block to fade it would put two of them in the layout at
+   once and shove the page taller for the length of the transition. It
+   leaves immediately; the one arriving is what you watch. @starting-style
+   still gives that arrival something to fade up from. */
+.tab-pane { opacity: 0; transition: opacity .2s ease; }
+@starting-style { .tab-pane.active { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .tab-pane { transition: none; } }
 
 .pane-label {
   font-size: .72rem;
@@ -712,7 +724,23 @@ th[data-sort="annual_equiv"] { text-align: right; }
   border-radius: 0 20px 20px 0; background: var(--bg3);
   margin-left: -20px; /* reaches past the type button's own right-side curve */
 }
-.party-filter-inline.visible { display: inline-flex; }
+.party-filter-inline.visible { display: inline-flex; opacity: 1; transform: translateX(0); }
+/* Sliding out from behind the type button it is tucked under. display:none
+   cannot be transitioned on its own, so it is listed with allow-discrete and
+   @starting-style gives the entrance something to start from; without that
+   the drawer would appear at its final state and only fade on the way out. */
+.party-filter-inline {
+  opacity: 0; transform: translateX(-10px);
+  transition: opacity .18s ease, transform .18s cubic-bezier(.4,0,.2,1),
+              display .18s allow-discrete;
+}
+@starting-style {
+  .party-filter-inline.visible { opacity: 0; transform: translateX(-10px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .party-filter-inline { transition: none; transform: none; }
+  .party-filter-inline.visible { transform: none; }
+}
 .party-filter-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: 50%;
@@ -777,6 +805,12 @@ th[data-sort="annual_equiv"] { text-align: right; }
 .office-chevron { font-size: 1rem; color: var(--ink3); transition: transform .15s; }
 
 .office-detail { background: var(--bg2); border-radius: 8px; margin: 4px 0 10px; padding: 16px 18px; }
+/* Offices already in the list are FLIP-slid to their new rank by
+   morphKeyedRows(). This is for the ones that were not there before, which
+   have nowhere to slide from. */
+.office-wrap-in { animation: officeWrapIn 260ms ease-out both; }
+@keyframes officeWrapIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .office-wrap-in { animation: none; } }
 .office-detail-member-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .office-detail-photo { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
 .office-detail-member-name { font-weight: 800; font-size: .95rem; color: var(--ink); display: flex; align-items: center; }

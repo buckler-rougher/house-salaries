@@ -31,6 +31,8 @@ function fuzzyNameMatch(haystack, queryLower) {
   return qWords.length > 0 && qWords.every(qw => hayWords.some(hw => hw.includes(qw)));
 }
 
+const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+let openOfficeName = null; // survives a re-render, see renderOfficeList()
 let summary = null, employees = [];
 let trendMetric = "median", trendMode = "overall", trendQFilter = 0;
 let sortKey = "annual_equiv", sortDir = -1, page = 1, filtered = [];
@@ -1295,7 +1297,7 @@ function morphKeyedRows(newContainer, rowSelector, priorRects) {
     const key = row.dataset.key;
     const priorRect = key && priorRects.get(key);
     if (!priorRect) return; // no match — template's own fade/rise-in animation (if any) plays instead
-    row.classList.remove("range-staff-row-in", "pos-row-in");
+    row.classList.remove("range-staff-row-in", "pos-row-in", "office-wrap-in");
     const newRect = row.getBoundingClientRect();
     const dy = priorRect.top - newRect.top;
     if (Math.abs(dy) < 1) return;
@@ -3664,6 +3666,46 @@ function officeRangeHtml(o, sortKey) {
   return `${fmtK(o.min)}<span class="office-range-sep">–</span>${fmtK(o.max)}`;
 }
 
+// Opening and closing an office card. The row click and the re-open that
+// follows a rebuild both come through here, so they cannot drift apart; the
+// second passes animate: false because the card was already open and should
+// not replay its entrance.
+function setOfficeOpen(wrap, open, animate = true) {
+  const detail = wrap.querySelector(".office-detail");
+  const chevron = wrap.querySelector(".office-chevron");
+  if (!detail) return;
+  if (open && !detail.dataset.loaded) {
+    detail.dataset.loaded = "1";
+    renderOfficeDetail(wrap.dataset.office, detail);
+  }
+  if (chevron) chevron.style.transform = open ? "rotate(90deg)" : "";
+  const settle = () => {
+    detail.style.transition = ""; detail.style.height = "";
+    detail.style.opacity = ""; detail.style.overflow = "";
+  };
+  if (!animate || prefersReducedMotion()) {
+    detail.style.display = open ? "" : "none";
+    settle();
+    return;
+  }
+  detail.style.display = "";
+  detail.style.overflow = "hidden";
+  const h = detail.scrollHeight;
+  detail.style.height = (open ? 0 : h) + "px";
+  detail.style.opacity = open ? "0" : "1";
+  void detail.offsetWidth; // paint the "from" state before transitioning off it
+  detail.style.transition = "height 260ms cubic-bezier(.4,0,.2,1), opacity 180ms ease";
+  detail.style.height = (open ? h : 0) + "px";
+  detail.style.opacity = open ? "1" : "0";
+  const done = e => {
+    if (e.propertyName !== "height") return; // opacity lands first; ignore it
+    detail.removeEventListener("transitionend", done);
+    if (!open) detail.style.display = "none";
+    settle(); // back to height:auto, so the card can grow with its content
+  };
+  detail.addEventListener("transitionend", done);
+}
+
 function renderOfficeList() {
   const q = ($("office-search").value || "").toLowerCase().trim();
   officeSortKey = $("office-sort").value;
@@ -3685,6 +3727,14 @@ function renderOfficeList() {
   });
 
   const container = $("office-list");
+  // Where each office sits right now, so the rebuild below can slide them to
+  // their new places instead of snapping. Sorting, searching, and the type
+  // filter all land here.
+  const priorRects = new Map();
+  container.querySelectorAll(".office-wrap").forEach(w => {
+    if (w.dataset.key) priorRects.set(w.dataset.key, w.getBoundingClientRect());
+  });
+
   if (rows.length === 0) {
     container.innerHTML = `<div style="padding:16px 0;font-size:.85rem;color:var(--ink3)">No matching offices.</div>`;
     return;
@@ -3694,7 +3744,13 @@ function renderOfficeList() {
   listEl.className = "office-list";
   rows.slice(0, 150).forEach(o => {
     const wrap = document.createElement("div");
-    wrap.className = "office-wrap";
+    // Only mark arrivals once there is a previous list to have arrived into:
+    // on a cold render every row is "new" and 150 of them fading in at once
+    // is noise, not an entrance.
+    const isNew = priorRects.size > 0 && !priorRects.has(o.name);
+    wrap.className = "office-wrap" + (isNew ? " office-wrap-in" : "");
+    wrap.dataset.key = o.name;
+    wrap.dataset.office = o.name;
     wrap.innerHTML = `
       <div class="office-row">
         <div class="office-name"><span class="office-name-text">${esc(o.name)}</span>${officePartyBadge(o)}</div>
@@ -3704,28 +3760,31 @@ function renderOfficeList() {
         <span class="office-chevron">›</span>
       </div>
       <div class="office-detail" style="display:none"></div>`;
-    const row = wrap.querySelector(".office-row");
-    const detail = wrap.querySelector(".office-detail");
-    const chevron = wrap.querySelector(".office-chevron");
-    row.addEventListener("click", () => {
-      const open = detail.style.display !== "none";
-      // close all
-      container.querySelectorAll(".office-detail").forEach(d => d.style.display="none");
-      container.querySelectorAll(".office-chevron").forEach(c => { c.textContent="›"; c.style.transform=""; });
-      if (!open) {
-        detail.style.display = "";
-        chevron.textContent = "›";
-        chevron.style.transform = "rotate(90deg)";
-        if (!detail.dataset.loaded) {
-          detail.dataset.loaded = "1";
-          renderOfficeDetail(o.name, detail);
-        }
-      }
+    wrap.querySelector(".office-row").addEventListener("click", () => {
+      const wasOpen = openOfficeName === o.name;
+      // One card at a time, as before.
+      listEl.querySelectorAll(".office-wrap").forEach(w => {
+        const d = w.querySelector(".office-detail");
+        if (w !== wrap && d && d.style.display !== "none") setOfficeOpen(w, false);
+      });
+      setOfficeOpen(wrap, !wasOpen);
+      openOfficeName = wasOpen ? null : o.name;
     });
     listEl.appendChild(wrap);
   });
   container.innerHTML = "";
   container.appendChild(listEl);
+
+  // Put the open card back. A rebuild gets triggered by things that have
+  // nothing to do with it, the inflation toggle and the quarter nav among
+  // them, and having the card shut itself on those reads as the site
+  // closing it on you.
+  if (openOfficeName) {
+    const open = [...listEl.querySelectorAll(".office-wrap")]
+      .find(w => w.dataset.office === openOfficeName);
+    if (open) setOfficeOpen(open, true, false); else openOfficeName = null;
+  }
+  if (priorRects.size) morphKeyedRows(listEl, ".office-wrap", priorRects);
 }
 
 function jumpToOffice(officeName) {
@@ -3737,8 +3796,11 @@ function jumpToOffice(officeName) {
   renderOfficeList();
   saveState();
   requestAnimationFrame(() => {
+    // Match on the key, not on rendered text: .office-name holds the party
+    // badge as well as the name, so its textContent carries a trailing D, R,
+    // or I and never equalled the office name for a member office.
     const wrap = [...document.querySelectorAll("#office-list .office-wrap")]
-      .find(w => w.querySelector(".office-name")?.textContent === officeName);
+      .find(w => w.dataset.office === officeName);
     if (wrap) {
       wrap.querySelector(".office-row").click();
       wrap.scrollIntoView({ behavior: "smooth", block: "center" });
