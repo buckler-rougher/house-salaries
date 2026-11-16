@@ -1301,6 +1301,10 @@ function morphKeyedRows(newContainer, rowSelector, priorRects) {
     const newRect = row.getBoundingClientRect();
     const dy = priorRect.top - newRect.top;
     if (Math.abs(dy) < 1) return;
+    // Past about a screen the eye cannot follow the row anyway, and a
+    // long flight across unrelated content reads as a glitch. Let those
+    // ones just be in their new place.
+    if (Math.abs(dy) > window.innerHeight * 1.2) return;
     row.style.transition = "none";
     row.style.transform = `translateY(${dy}px)`;
     void row.offsetWidth; // force reflow so the "from" position paints before transitioning
@@ -3740,14 +3744,31 @@ function renderOfficeList() {
     return;
   }
 
+  const visible = rows.slice(0, 150);
+
+  // Two different things get called "the list changed", and they want two
+  // different animations.
+  //
+  // A sort keeps the same offices and puts them in a new order. Every row has
+  // somewhere it came from, the moves are mostly short, and sliding each one
+  // to its new rank is exactly right.
+  //
+  // A type filter or a search replaces the membership. Nearly every row is
+  // new, so there is nothing to slide, and the two or three survivors get
+  // flung hundreds of pixels across the viewport past rows they have no
+  // relationship to. That is the bad one. Fade the list as a whole instead
+  // and let the rows simply be where they are.
+  const kept = visible.filter(o => priorRects.has(o.name)).length;
+  const isReorder = priorRects.size > 0 &&
+    kept >= Math.min(priorRects.size, visible.length) * 0.8;
+
   const listEl = document.createElement("div");
-  listEl.className = "office-list";
-  rows.slice(0, 150).forEach(o => {
+  listEl.className = "office-list" + (priorRects.size && !isReorder ? " office-list-in" : "");
+  visible.forEach(o => {
     const wrap = document.createElement("div");
-    // Only mark arrivals once there is a previous list to have arrived into:
-    // on a cold render every row is "new" and 150 of them fading in at once
-    // is noise, not an entrance.
-    const isNew = priorRects.size > 0 && !priorRects.has(o.name);
+    // Per-row entrances only belong to a reorder, where they mark the few
+    // genuine arrivals. In a wholesale swap the container fade covers it.
+    const isNew = isReorder && !priorRects.has(o.name);
     wrap.className = "office-wrap" + (isNew ? " office-wrap-in" : "");
     wrap.dataset.key = o.name;
     wrap.dataset.office = o.name;
@@ -3784,7 +3805,7 @@ function renderOfficeList() {
       .find(w => w.dataset.office === openOfficeName);
     if (open) setOfficeOpen(open, true, false); else openOfficeName = null;
   }
-  if (priorRects.size) morphKeyedRows(listEl, ".office-wrap", priorRects);
+  if (isReorder) morphKeyedRows(listEl, ".office-wrap", priorRects);
 }
 
 function jumpToOffice(officeName) {

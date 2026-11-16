@@ -808,6 +808,13 @@ th[data-sort="annual_equiv"] { text-align: right; }
 /* Offices already in the list are FLIP-slid to their new rank by
    morphKeyedRows(). This is for the ones that were not there before, which
    have nowhere to slide from. */
+/* A wholesale swap of the list, from the type filter or the search box.
+   The rows have no previous position worth sliding from, so the list
+   arrives as one thing. */
+.office-list-in { animation: officeListIn 200ms ease-out both; }
+@keyframes officeListIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .office-list-in { animation: none; } }
+
 .office-wrap-in { animation: officeWrapIn 260ms ease-out both; }
 @keyframes officeWrapIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .office-wrap-in { animation: none; } }
