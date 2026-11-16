@@ -811,8 +811,11 @@ th[data-sort="annual_equiv"] { text-align: right; }
 /* A wholesale swap of the list, from the type filter or the search box.
    The rows have no previous position worth sliding from, so the list
    arrives as one thing. */
-.office-list-in { animation: officeListIn 200ms ease-out both; }
-@keyframes officeListIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+/* Opacity only, no transform. This element wraps up to 150 rows, and
+   translating a subtree that size means promoting a very large layer for the
+   sake of a 4px slide. The fade alone is cheaper and reads the same. */
+.office-list-in { animation: officeListIn 180ms ease-out both; }
+@keyframes officeListIn { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .office-list-in { animation: none; } }
 
 .office-wrap-in { animation: officeWrapIn 260ms ease-out both; }

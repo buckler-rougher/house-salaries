@@ -656,7 +656,6 @@ async function navigateQuarter(dir) {
   buildTitles();
   renderPosResults($("pos-search")?.value || "");
   buildOfficeData();
-  renderOfficeList();
   $("type-bars").innerHTML = ""; renderTypeBars();
   // Re-render trend highlight if trend tab is active
   const trendPane = $("tab-trend");
@@ -693,6 +692,7 @@ async function navigateQuarter(dir) {
     }
   }
   saveState();
+  await renderOfficeListDeferred();
 }
 
 // Member has D/R/I; Leadership only ever resolves to D/R (see
@@ -717,6 +717,23 @@ function updatePartyFilterVisibility() {
   }
 }
 
+// Four callers (the quarter nav, the type filter, the party filter, and the
+// inflation toggle) each run a long synchronous block of re-renders. The
+// office list used to sit in the middle of that block, so its fade began
+// while the thread still had renderTypeBars(), applyFilters() over the whole
+// staff table, renderTrend(), and a re-render of the open card ahead of it.
+// An animation whose opening frames fall inside a long task does not play.
+// It holds its start state and jumps to the end when the thread frees up,
+// which is what read as jank.
+//
+// Rendering it last, a frame after the rest has painted, gives the fade an
+// idle thread. It depends only on buildOfficeData(), which every caller runs
+// well before this.
+async function renderOfficeListDeferred() {
+  await new Promise(requestAnimationFrame);
+  renderOfficeList();
+}
+
 async function setOfficeTypeFilter(type) {
   officeTypeFilter = type;
   document.querySelectorAll(".type-filter-btn[data-type]").forEach(b => b.classList.toggle("active", (b.dataset.type || "") === type));
@@ -731,13 +748,13 @@ async function setOfficeTypeFilter(type) {
   buildTitles();
   renderPosResults($("pos-search")?.value || "");
   buildOfficeData();
-  renderOfficeList();
   $("type-bars").innerHTML = ""; renderTypeBars();
   if (!isLatestQuarter()) await loadPeople();
   applyFilters();
   renderTrend();
 
   await refreshOpenSelectionAndSaveState();
+  await renderOfficeListDeferred();
 }
 
 async function setPartyFilter(party) {
@@ -749,13 +766,13 @@ async function setPartyFilter(party) {
   buildTitles();
   renderPosResults($("pos-search")?.value || "");
   buildOfficeData();
-  renderOfficeList();
   $("type-bars").innerHTML = ""; renderTypeBars();
   if (!isLatestQuarter()) await loadPeople();
   applyFilters();
   renderTrend();
 
   await refreshOpenSelectionAndSaveState();
+  await renderOfficeListDeferred();
 }
 
 // Re-render whatever is open in the left panel after a global filter (office
@@ -797,7 +814,6 @@ async function setInflationOn(on) {
   buildTitles();
   renderPosResults($("pos-search")?.value || "");
   buildOfficeData();
-  renderOfficeList();
   $("type-bars").innerHTML = ""; renderTypeBars();
   if (!isLatestQuarter()) await loadPeople();
   applyFilters();
@@ -827,6 +843,7 @@ async function setInflationOn(on) {
     }
   }
   saveState();
+  await renderOfficeListDeferred();
 }
 
 function updateInflationNote() {
