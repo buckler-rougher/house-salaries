@@ -703,18 +703,68 @@ function partyOptionsFor(type) {
   return [];
 }
 
+// Horizontal FLIP across one row. Run the mutation inside it and anything
+// that ends up somewhere else slides there instead of appearing there.
+// Items that were not laid out before, or are not laid out after, are left
+// alone: a zero rect is display:none, not a position, and animating from it
+// would fling the element in from the left edge.
+function flipRowX(row, mutate, ms = 240) {
+  if (!row || prefersReducedMotion()) { mutate(); return; }
+  const before = new Map();
+  [...row.children].forEach(el => {
+    const r = el.getBoundingClientRect();
+    if (r.width) before.set(el, r.left);
+  });
+  mutate();
+  [...row.children].forEach(el => {
+    const from = before.get(el);
+    if (from == null) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    const dx = from - r.left;
+    if (Math.abs(dx) < 1) return;
+    el.style.transition = "none";
+    el.style.transform = `translateX(${dx}px)`;
+    void el.offsetWidth; // paint the old position before moving off it
+    requestAnimationFrame(() => {
+      el.style.transition = `transform ${ms}ms cubic-bezier(.4,0,.2,1)`;
+      el.style.transform = "";
+      const done = e => {
+        if (e.propertyName !== "transform") return;
+        el.removeEventListener("transitionend", done);
+        // Clear both: .type-filter-btn carries its own `transition: all .12s`
+        // for the active-state colour change, and leaving an inline
+        // transition here would shadow it.
+        el.style.transition = ""; el.style.transform = "";
+      };
+      el.addEventListener("transitionend", done);
+    });
+  });
+}
+
 function updatePartyFilterVisibility() {
   const opts = partyOptionsFor(officeTypeFilter);
   const inline = $("party-filter-inline");
-  inline?.classList.toggle("visible", opts.length > 0);
-  $("party-filter-i-btn")?.classList.toggle("party-filter-i-hidden", !opts.includes("I"));
-  // Keep the pill physically next to whichever type button it's describing
-  // (Member or Leadership), not stranded after Administrative regardless of
-  // which one is active.
-  if (inline && opts.length > 0) {
-    const activeTypeBtn = document.querySelector(`.type-filter-btn[data-type="${officeTypeFilter}"]`);
-    activeTypeBtn?.insertAdjacentElement("afterend", inline);
-  }
+  // Showing, hiding, and relocating the drawer all resize or reorder this
+  // row, and every button after it used to jump sideways in a single frame.
+  // The drawer fades on its own; this is for everything it shoves.
+  flipRowX($("type-filter-row"), () => {
+    inline?.classList.toggle("visible", opts.length > 0);
+    $("party-filter-i-btn")?.classList.toggle("party-filter-i-hidden", !opts.includes("I"));
+    // Keep the pill physically next to whichever type button it's describing
+    // (Member or Leadership), not stranded after Administrative regardless of
+    // which one is active.
+    if (inline && opts.length > 0) {
+      const activeTypeBtn = document.querySelector(`.type-filter-btn[data-type="${officeTypeFilter}"]`);
+      // Only when it is actually in the wrong place. insertAdjacentElement
+      // removes and re-inserts regardless, and a re-insertion counts as a
+      // fresh element, so @starting-style would replay the drawer's fade
+      // every time this runs with it already sitting where it belongs.
+      if (activeTypeBtn && activeTypeBtn.nextElementSibling !== inline) {
+        activeTypeBtn.insertAdjacentElement("afterend", inline);
+      }
+    }
+  });
 }
 
 // Four callers (the quarter nav, the type filter, the party filter, and the
