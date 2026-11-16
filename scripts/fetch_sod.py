@@ -1,0 +1,965 @@
+#!/usr/bin/env python3
+"""
+Download and process House Statement of Disbursements CSVs.
+Outputs salary data to data/summary.json and data/employees.json.
+
+Key column notes (from actual CSVs):
+- Column headers have trailing spaces; strip all keys
+- Personnel rows: SORT SUBTOTAL DESCRIPTION == "PERSONNEL COMPENSATION"
+- DESCRIPTION field contains job title (e.g. "LEGISLATIVE ASSISTANT", "CHIEF OF STAFF")
+- AMOUNT is the quarterly payment in dollars
+"""
+import csv, json, io, re, os, sys, math, urllib.request, urllib.parse, unicodedata
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import suppression
+from suppression import normalize_name
+
+BASE = "https://www.house.gov"
+MEMBER_DATA_URL = "https://clerk.house.gov/xml/lists/MemberData.xml"
+
+QUARTERS = [
+    {"id": "2026Q2", "label": "Apr–Jun 2026", "year": 2026, "q": 2, "url": f"{BASE}/sites/default/files/2026-08/grids/APRIL-JUNE%202026%20SOD%20DETAIL%20GRID-FINAL.csv"},
+    {"id": "2026Q1", "label": "Jan–Mar 2026", "year": 2026, "q": 1, "url": f"{BASE}/sites/default/files/2026-05/grids/JAN-MAR%202026%20SOD%20DETAIL%20GRID-FINAL.csv"},
+    {"id": "2025Q4", "label": "Oct–Dec 2025", "year": 2025, "q": 4, "url": f"{BASE}/sites/default/files/2026-02/OCT-DEC-2025-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2025Q3", "label": "Jul–Sep 2025", "year": 2025, "q": 3, "url": f"{BASE}/sites/default/files/2025-11/grids/JULY-SEPTEMBER%202025%20SOD%20DETAIL%20GRID-FINAL.csv"},
+    {"id": "2025Q2", "label": "Apr–Jun 2025", "year": 2025, "q": 2, "url": f"{BASE}/sites/default/files/2025-08/APRIL-JUNE%202025%20SOD%20DETAIL%20GRID-FINAL.csv"},
+    {"id": "2025Q1", "label": "Jan–Mar 2025", "year": 2025, "q": 1, "url": f"{BASE}/sites/default/files/2025-05/JANUARY-MARCH-2025-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2024Q4", "label": "Oct–Dec 2024", "year": 2024, "q": 4, "url": f"{BASE}/sites/default/files/2025-02/OCTOBER-DECEMBER-2024-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2024Q3", "label": "Jul–Sep 2024", "year": 2024, "q": 3, "url": f"{BASE}/sites/default/files/2024-11/JULY-SEPTEMBER_2024_SOD_DETAIL_GRID-FINAL.csv"},
+    {"id": "2024Q2", "label": "Apr–Jun 2024", "year": 2024, "q": 2, "url": f"{BASE}/sites/default/files/2024-08/APRIL-JUNE-2024-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2024Q1", "label": "Jan–Mar 2024", "year": 2024, "q": 1, "url": f"{BASE}/sites/default/files/2024-05/JAN-MAR-2024-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2023Q4", "label": "Oct–Dec 2023", "year": 2023, "q": 4, "url": f"{BASE}/sites/default/files/2024-02/OCT-DEC-2023-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2023Q3", "label": "Jul–Sep 2023", "year": 2023, "q": 3, "url": f"{BASE}/sites/default/files/2023-11/JULY-SEPTEMBER-2023-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2023Q2", "label": "Apr–Jun 2023", "year": 2023, "q": 2, "url": f"{BASE}/sites/default/files/2023-08/APRIL-JUNE%202023%20SOD%20DETAIL%20GRID-FINAL.csv"},
+    {"id": "2023Q1", "label": "Jan–Mar 2023", "year": 2023, "q": 1, "url": f"{BASE}/sites/default/files/2023-05/JAN-MAR-2023-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2022Q4", "label": "Oct–Dec 2022", "year": 2022, "q": 4, "url": f"{BASE}/sites/default/files/2023-02/OCT-DEC-2022-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2022Q3", "label": "Jul–Sep 2022", "year": 2022, "q": 3, "url": f"{BASE}/sites/default/files/2022-11/JULY-SEPT-2022-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2022Q2", "label": "Apr–Jun 2022", "year": 2022, "q": 2, "url": f"{BASE}/sites/default/files/2022-08/APR-JUNE-2022-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2022Q1", "label": "Jan–Mar 2022", "year": 2022, "q": 1, "url": f"{BASE}/sites/default/files/2022-05/JAN-MAR-2022-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2021Q4", "label": "Oct–Dec 2021", "year": 2021, "q": 4, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/2021q4/OCT-DEC-2021-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2021Q3", "label": "Jul–Sep 2021", "year": 2021, "q": 3, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/2021q3/JULY-2021-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2021Q2", "label": "Apr–Jun 2021", "year": 2021, "q": 2, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/2021q2/APR-JUN%202021%20SOD%20DETAIL%20GRID_FINAL.csv"},
+    {"id": "2021Q1", "label": "Jan–Mar 2021", "year": 2021, "q": 1, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/2021q1/JAN_MAR_2021_SOD_DETAIL_GRID_FINAL.csv"},
+    {"id": "2020Q4", "label": "Oct–Dec 2020", "year": 2020, "q": 4, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/2020q4/OCT-DEC 2020 SOD DETAIL GRID_FINAL.csv"},
+    {"id": "2020Q3", "label": "Jul–Sep 2020", "year": 2020, "q": 3, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/2020q3/JULY-SEPT-2020-SOD-DETAIL-GRID-FINAL.csv"},
+    {"id": "2020Q2", "label": "Apr–Jun 2020", "year": 2020, "q": 2, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/APR-JUN-2020-SOD-DETAIL-GRID_FINAL.csv"},
+    {"id": "2020Q1", "label": "Jan–Mar 2020", "year": 2020, "q": 1, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/JAN-MAR-2020-SOD-DETAIL-GRID_FINAL.csv"},
+    {"id": "2019Q4", "label": "Oct–Dec 2019", "year": 2019, "q": 4, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/OCT-DEC-2019-SOD-DETAIL-GRID.csv"},
+    {"id": "2019Q3", "label": "Jul–Sep 2019", "year": 2019, "q": 3, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/JUL-SEPT 2019 SOD DETAIL GRID.csv"},
+    {"id": "2019Q2", "label": "Apr–Jun 2019", "year": 2019, "q": 2, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/APR-JUN 2019 SOD DETAIL GRID.csv"},
+    {"id": "2019Q1", "label": "Jan–Mar 2019", "year": 2019, "q": 1, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/JAN-MAR 2019 SOD DETAIL GRID.CSV"},
+    {"id": "2018Q4", "label": "Oct–Dec 2018", "year": 2018, "q": 4, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/OCT-DEC 2018 SOD DETAIL GRID.csv"},
+    {"id": "2018Q3", "label": "Jul–Sep 2018", "year": 2018, "q": 3, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/JULY-SEPTEMBER 2018 SOD DETAIL GRID.csv"},
+    {"id": "2018Q2", "label": "Apr–Jun 2018", "year": 2018, "q": 2, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/APR-JUNE-2018-SOD-DETAIL-GRID.csv"},
+    {"id": "2018Q1", "label": "Jan–Mar 2018", "year": 2018, "q": 1, "url": f"{BASE}/sites/default/files/uploads/documents/JAN-MAR 2018 SOD DETAIL GRID.csv"},
+    {"id": "2017Q4", "label": "Oct–Dec 2017", "year": 2017, "q": 4, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/OCT-DEC 2017 SOD DETAIL GRID.csv"},
+    {"id": "2017Q3", "label": "Jul–Sep 2017", "year": 2017, "q": 3, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/JUL-SEPT 2017 SOD DETAIL GRID.csv"},
+    {"id": "2017Q2", "label": "Apr–Jun 2017", "year": 2017, "q": 2, "url": f"{BASE}/sites/default/files/uploads/documents/APR-JUN 2017 DETAIL GRID.csv"},
+    {"id": "2017Q1", "label": "Jan–Mar 2017", "year": 2017, "q": 1, "url": f"{BASE}/sites/default/files/uploads/documents/SODs/JAN-MAR 2017 DETAIL GRID.csv"},
+    {"id": "2016Q4", "label": "Oct–Dec 2016", "year": 2016, "q": 4, "url": f"{BASE}/sites/default/files/uploads/documents/OCT-DEC 2016 DETAIL GRID.csv"},
+    {"id": "2016Q3", "label": "Jul–Sep 2016", "year": 2016, "q": 3, "url": f"{BASE}/sites/default/files/uploads/documents/JULY-SEPT-2016-SOD-DETAIL-GRID.csv"},
+    {"id": "2016Q2", "label": "Apr–Jun 2016", "year": 2016, "q": 2, "url": f"{BASE}/sites/default/files/uploads/documents/APR-JUNE-2016-SOD-DETAIL-GRID-REVISE-9_26_16.csv"},
+    {"id": "2016Q1", "label": "Jan–Mar 2016", "year": 2016, "q": 1, "url": f"{BASE}/sites/default/files/uploads/documents/JAN-MAR-2016-SOD-DETAIL-GRID_REVISED_9_26_16.csv"},
+]
+
+HOUSE_MIN_ANNUAL = 45000  # House minimum salary (set 2022)
+HOUSE_MIN_QUARTERLY = HOUSE_MIN_ANNUAL / 4  # ~$11,250
+
+def is_intern(title):
+    t = title.upper()
+    # Bare substring match false-positives on "Internet Systems Specialist"
+    # ($172k) and "International Trade Policy Adv..." ($154k) — real staff,
+    # not interns. Word-boundary avoids that.
+    if not re.search(r"\bINTERN\b|\bINTERNSHIP\b", t):
+        return False
+    # A handful of real, well-paid staff titles describe managing/coordinating
+    # the internship program rather than being an intern themselves — e.g.
+    # "Manager, House Intern Resource" ($116k/yr) or "Policy Aide/Intern
+    # Coordinator" ($75k/yr). DESCRIPTION gets truncated by the source CSV
+    # (e.g. "Staff Assistant/Intern Coordin"), so match on a safe prefix
+    # rather than the full word. (Deliberately not excluding "OFFICE" — that
+    # collides with genuine intern titles like "District Office Paid Intern".)
+    if re.search(r"\bCOORDIN|\bMANAGER\b|\bRESOURCE", t):
+        return False
+    return True
+
+def classify_office(org):
+    s = re.sub(r"^\d{4}\s+", "", org.upper())
+    if s.startswith("HON.") or "REPRESENTATIVE" in s:
+        return "member"
+    if "COMMITTEE" in s:
+        return "committee"
+    if any(x in s for x in ["SPEAKER", "MAJORITY LEADER", "MINORITY LEADER",
+                              "MAJORITY WHIP", "MINORITY WHIP", "REPUBLICAN CONFERENCE",
+                              "DEMOCRATIC CAUCUS", "DEMOCRATIC CONFERENCE",
+                              "REPUBLICAN STUDY"]):
+        return "leadership"
+    return "administrative"
+
+def _party_norm(s):
+    """Letters-only, accent-stripped, uppercase — the normal form both SOD
+    org names and Clerk member names are compared in, so spacing/punctuation
+    differences (periods, double spaces, hyphens) don't cause a miss."""
+    stripped = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+    return re.sub(r"[^A-Z]", "", stripped.upper())
+
+# Maps a member-office org name (post strip_org_prefix, e.g. "HON. JARED
+# MOSKOWITZ") to {"party": "D"/"R"/"I", "state": "CA", "district": "12"}.
+# Populated once per run by fetch_member_parties(); empty until then.
+MEMBER_PARTY_BY_ORG = {}
+
+def fetch_member_parties():
+    """Downloads the Clerk's current-Congress member roster and returns a
+    lookup from normalized full name -> member dict, keyed several ways
+    (with/without middle name, with/without suffix) since SOD's "HON. X"
+    org names aren't consistent about including either. Matching is exact
+    on the normalized string, not fuzzy — a false match would mislabel a
+    real person's party, so an unmatched (historical, or unusual-format)
+    office is left without a party rather than guessed at."""
+    req = urllib.request.Request(MEMBER_DATA_URL, headers={"User-Agent": "house-salaries-bot/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            root = ET.fromstring(resp.read())
+    except Exception as e:
+        print(f"  ! Member party fetch failed ({e}) — party badges will be unavailable", flush=True)
+        return {}, {}, None, None
+
+    title_info = root.find(".//title-info")
+    majority = (title_info.findtext("majority") or "").strip() or None if title_info is not None else None
+    minority = (title_info.findtext("minority") or "").strip() or None if title_info is not None else None
+
+    members = []
+    for m in root.findall(".//member"):
+        info = m.find("member-info")
+        if info is None:
+            continue
+        state_el = info.find("state")
+        state = state_el.get("postal-code") if state_el is not None else ""
+        district = m.findtext("statedistrict") or ""
+        if (info.findtext("party") or "").strip():
+            party = (info.findtext("party") or "").strip()
+            members.append({
+                "last": (info.findtext("lastname") or "").strip(),
+                "first": (info.findtext("firstname") or "").strip(),
+                "middle": (info.findtext("middlename") or "").strip(),
+                "suffix": (info.findtext("suffix") or "").strip(),
+                "party": party,
+                # <caucus> is the conference a member actually sits with, which
+                # can diverge from <party> (e.g. an independent who caucuses
+                # Republican) — fall back to party if caucus is blank.
+                "caucus": (info.findtext("caucus") or "").strip() or party,
+                "state": state, "district": district,
+                "bioguide": (info.findtext("bioguideID") or "").strip(),
+            })
+        # A seat vacated recently (resignation/death) has no sitting member,
+        # but our SOD data can still cover quarters when it was occupied —
+        # predecessor-info carries that former member's name and party.
+        pred = m.find("predecessor-info")
+        if pred is not None and (pred.findtext("pred-party") or "").strip():
+            pred_party = (pred.findtext("pred-party") or "").strip()
+            members.append({
+                "last": (pred.findtext("pred-lastname") or "").strip(),
+                "first": (pred.findtext("pred-firstname") or "").strip(),
+                "middle": (pred.findtext("pred-middlename") or "").strip(),
+                "suffix": "",
+                "party": pred_party,
+                # predecessor-info has no caucus field; party is the best
+                # available stand-in for a former member.
+                "caucus": pred_party,
+                "state": state, "district": district,
+                # pred-memindex is the predecessor's own bioguide ID (same ID
+                # format/space as bioguideID above, just a differently-named
+                # tag on this branch of the schema).
+                "bioguide": (pred.findtext("pred-memindex") or "").strip(),
+            })
+
+    by_name, by_last = {}, {}
+    for mem in members:
+        variants = []
+        if mem["middle"]:
+            variants.append(f"{mem['first']} {mem['middle']} {mem['last']}")
+            variants.append(f"{mem['first']} {mem['middle'][0]}. {mem['last']}")
+        variants.append(f"{mem['first']} {mem['last']}")
+        for v in variants:
+            for full in (v, f"{v} {mem['suffix']}") if mem["suffix"] else (v,):
+                by_name.setdefault(_party_norm(full), []).append(mem)
+        by_last.setdefault(_party_norm(mem["last"]), []).append(mem)
+    return by_name, by_last, majority, minority
+
+# Which party currently holds the majority/minority — read once from Clerk's
+# <title-info> (e.g. "R"/"D") by build_member_party_lookup(). Used to resolve
+# leadership offices like "OFFICE OF THE MAJORITY LEADER" to an actual party.
+MAJORITY_PARTY, MINORITY_PARTY = None, None
+
+def leadership_party_for(org_name):
+    """Classifies a leadership-type office name as "D"/"R" using the office
+    name itself (Speaker and Majority/Minority Leader/Whip offices aren't
+    party-named, so this needs MAJORITY_PARTY/MINORITY_PARTY; the caucus/
+    conference offices name their party outright). Returns None for anything
+    that isn't a clearly partisan leadership office."""
+    s = org_name.upper()
+    if "DEMOCRATIC" in s:
+        return "D"
+    if "REPUBLICAN" in s:
+        return "R"
+    if "MINORITY" in s:
+        return MINORITY_PARTY
+    if "MAJORITY" in s or "SPEAKER" in s:
+        return MAJORITY_PARTY
+    return None
+
+def build_member_party_lookup():
+    """Builds MEMBER_PARTY_BY_ORG (org name -> party info) by matching every
+    known SOD member-office name against the Clerk roster. Call once before
+    processing quarters."""
+    global MAJORITY_PARTY, MINORITY_PARTY
+    by_name, by_last, MAJORITY_PARTY, MINORITY_PARTY = fetch_member_parties()
+    if not by_name:
+        return
+
+    def dedupe(hits):
+        seen, out = set(), []
+        for h in hits:
+            key = (h["last"], h["first"], h["middle"], h["district"])
+            if key not in seen:
+                seen.add(key)
+                out.append(h)
+        return out
+
+    def resolve(org_name):
+        raw = re.sub(r"^HON\.\s*", "", org_name, flags=re.I).strip()
+        hits = dedupe(by_name.get(_party_norm(raw)) or [])
+        if len(hits) == 1:
+            return hits[0]
+        # Fallback: match by last 1-2 tokens as surname + first-name-prefix
+        # disambiguation, for formats fetch_member_parties()'s variants don't
+        # cover (extra suffixes like "MD", hyphenated surnames, etc.)
+        tokens = raw.split()
+        for last_len in (2, 1):
+            if len(tokens) < last_len + 1:
+                continue
+            cs = dedupe(by_last.get(_party_norm(" ".join(tokens[-last_len:]))) or [])
+            if not cs:
+                continue
+            first_key = _party_norm(tokens[0])[:3]
+            narrowed = [c for c in cs if _party_norm(c["first"]).startswith(first_key)]
+            if len(narrowed) == 1:
+                return narrowed[0]
+            if len(cs) == 1:
+                return cs[0]
+        return None
+    global _resolve_member
+    _resolve_member = resolve
+
+_resolve_member = lambda org_name: None
+
+def party_for(org_key, office_type):
+    """org_key must already be strip_org_prefix()'d. Returns {"party","caucus",
+    "state","district","bioguide"} or None (non-member office, or no confident
+    match). party is the member's own registration (shown in the UI badge/
+    filter); caucus is which conference they actually sit with (used for D/R
+    breakdowns where a nominal-independent-but-caucuses-with-a-party case
+    would otherwise show up as a meaningless third bucket); bioguide is their
+    Bioguide ID, used to link their official photo from the Biographical
+    Directory of the U.S. Congress (bioguide.congress.gov)."""
+    if office_type != "member":
+        return None
+    if org_key not in MEMBER_PARTY_BY_ORG:
+        mem = _resolve_member(org_key)
+        MEMBER_PARTY_BY_ORG[org_key] = (
+            {"party": mem["party"], "caucus": mem["caucus"], "state": mem["state"], "district": mem["district"],
+             "bioguide": mem["bioguide"]}
+            if mem else None
+        )
+    return MEMBER_PARTY_BY_ORG[org_key]
+
+NAME_SUFFIXES = {"II", "III", "IV", "V", "JR", "SR"}
+
+# Real Mac-prefix surnames where the letter right after "Mac" should be
+# capitalized (MacDonald, MacKenzie, ...) — NOT a general "starts with Mac"
+# rule, since plenty of ordinary surnames (Macias, Maczka, Macheledt) just
+# happen to start with those three letters and would be mangled by one.
+MAC_SURNAMES = {
+    "macdonald", "mackenzie", "maclean", "macarthur", "macgregor", "mackay",
+    "macfarlane", "macpherson", "macleod", "macbride", "maclaine", "maclay",
+    "macmillan", "macneil", "macneill", "maccallum", "macleay", "macrae",
+    "macinnes", "maclachlan", "macaulay", "macnab", "macnamara", "macphail",
+    "macquarie", "macqueen", "macewan", "macewen", "maccormack", "macdougall",
+    "macfadyen", "macfie", "macgowan", "mackinnon", "mackintosh", "maclure",
+    "macnaughton", "macnicol", "macready", "macvicar", "macwilliam",
+}
+
+def _fix_suffix_letter(w):
+    """capitalize() lowercases everything after the first letter, which
+    breaks Mc-/Mac-/O'-prefixed surnames (MCCANE -> Mccane instead of
+    McCane). Fix those three patterns; everything else is a plain
+    capitalize()."""
+    low = w.lower()
+    if low.startswith("mc") and len(w) > 2:
+        return "Mc" + w[2].upper() + w[3:].lower()
+    if (low.startswith("o'") or low.startswith("o’")) and len(w) > 2:
+        return w[:2].capitalize() + w[2].upper() + w[3:].lower()
+    if low in MAC_SURNAMES:
+        return "Mac" + w[3].upper() + w[4:].lower()
+    return w.capitalize()
+
+def cap_part(p):
+    """Capitalize a name segment, handling hyphens."""
+    if "-" in p:
+        return "-".join(_fix_suffix_letter(seg) for seg in p.split("-"))
+    return _fix_suffix_letter(p)
+
+def _extract_suffix(tokens):
+    """A generational suffix (II, III, Jr., ...) can show up in any of several
+    spots depending on how a given SOD row happened to be entered — stuck to
+    the last name before the comma ("WALKER III, JOHN"), right after the
+    comma ahead of the first name ("WALKER,III JOHN"), or with no comma at
+    all in either position ("WALKER III JOHN", "WALKER JOHN III"). Rather
+    than special-case each layout, scan every token once and pull the
+    suffix out wherever it is."""
+    for i, t in enumerate(tokens):
+        key = t.upper().rstrip(".")
+        if key in NAME_SUFFIXES:
+            suffix = key if key not in {"JR", "SR"} else key.capitalize() + "."
+            return tokens[:i] + tokens[i + 1:], suffix
+    return tokens, None
+
+def fmt_name(raw):
+    """SOD format is LAST FIRST [MIDDLE [SUFFIX]] — output First [Middle] Last [Suffix]."""
+    raw = raw.strip()
+    if "," in raw:
+        last_part, rest = raw.split(",", 1)
+        last_tokens, suffix1 = _extract_suffix(last_part.split())
+        rest_tokens, suffix2 = _extract_suffix([p.strip() for p in rest.split() if p.strip()])
+        suffix = suffix1 or suffix2
+        result = " ".join(cap_part(p) for p in rest_tokens) + " " + " ".join(cap_part(p) for p in last_tokens)
+        return result + (" " + suffix if suffix else "")
+    tokens, suffix = _extract_suffix(raw.split())
+    if not tokens:
+        return raw
+    if len(tokens) >= 2:
+        last, first_middle = tokens[0], tokens[1:]
+        result = " ".join(cap_part(p) for p in first_middle) + " " + cap_part(last)
+        return result + (" " + suffix if suffix else "")
+    return cap_part(tokens[0]) + (" " + suffix if suffix else "")
+
+TITLE_SMALL = {"of","the","a","an","and","or","but","in","on","at","to","for","with","by","from","vs","via"}
+KEEP_UPPER = {"DC","LA","IT","PR","HR","VA","MD","NY","CA","TX","FL","OH","PA","US","GOP","DNC","FBI","DOJ","CBO","OMB"}
+
+def _cap_word(w, force=False):
+    """Capitalize a single word segment, respecting abbreviations and small words."""
+    if "/" in w:
+        return "/".join(_cap_word(p, force=True) for p in w.split("/"))
+    up = w.upper()
+    if up in KEEP_UPPER:
+        return up
+    if not force and w.lower() in TITLE_SMALL:
+        return w.lower()
+    return w.capitalize()
+
+def title_case(s):
+    """Smart title case: lowercase prepositions, preserve abbreviations, capitalize after /."""
+    words = s.split()
+    return " ".join(_cap_word(w, force=(i == 0)) for i, w in enumerate(words))
+
+def normalize_title(desc):
+    """Normalize job title for grouping."""
+    return desc.strip().upper()
+
+# Spelling/abbreviation variants that are unambiguously the same job title
+# (typo'd, truncated, or differently-abbreviated in the raw SOD data) —
+# merged for stats/comparison purposes ("Look up a position", percentile
+# calcs) via title_group_key() below, same pattern as OFFICE_NAME_FIXUPS.
+# Each entry's displayed title on a person's own card is untouched; this
+# only affects which titles get pooled together for aggregate stats.
+# Deliberately excludes cases where a short form could also be a genuine
+# distinct title (e.g. "Chief" alone vs "Chief of Staff", "Executive" alone
+# vs "Executive Assistant") — those stay separate rather than risk merging
+# two different real roles just because one happens to be a substring.
+TITLE_MERGE_ALIASES = {
+    "DEPUTY CHIEF": "Deputy Chief of Staff",
+    "DEP CHIEF OF STAFF": "Deputy Chief of Staff",
+    "DEPUTY COS": "Deputy Chief of Staff",
+    "COMM DIR": "Communications Director",
+    "COMM DIRECTOR": "Communications Director",
+    "COMMS DIR": "Communications Director",
+    "COMMS DIRECTOR": "Communications Director",
+    "CONSTITUENT SERV": "Constituent Service",
+    "DEPUTY COMM DIR": "Deputy Communications Dir",
+    "DIGITAL ASSIST": "Digital Assistant",
+    "DIR OF OPERATIONS": "Director of Operations",
+    "DIRECTOR OPERATIONS": "Director of Operations",
+    "DIST DIR": "District Director",
+    "DIST DIRECTOR": "District Director",
+    "DIST SCHEDULER": "District Scheduler",
+    "DISTRICT DIR": "District Director",
+    "DISTRICT REP": "District Representative",
+    "DISTRICT SCHED": "District Scheduler",
+    "DO SCHEDULER": "District Scheduler",
+    "GRANTS C": "Grants Coordinator",
+    "GRANTS COOR": "Grants Coordinator",
+    "GRANTS COORDINATO": "Grants Coordinator",
+    "LC": "Legislative Correspondent",
+    "LD": "Legislative Director",
+    "LE": "Legislative",
+    "LEG ASST": "Legislative Assistant",
+    "LEG CORR": "Legislative Correspondent",
+    "LEG CORRES": "Legislative Correspondent",
+    "LEG CORRESPONDENT": "Legislative Correspondent",
+    "LEG DIR": "Legislative Director",
+    "LEG DIRECTOR": "Legislative Director",
+    "LEGI": "Legislative",
+    "LEGIS": "Legislative",
+    "LEGIS AIDE": "Legislative Aide",
+    "LEGIS ASSISTANT": "Legislative Assistant",
+    "LEGIS ASST": "Legislative Assistant",
+    "LEGIS CORRES": "Legislative Correspondent",
+    "LEGIS CORRESP": "Legislative Correspondent",
+    "LEGIS CORRESPONDENT": "Legislative Correspondent",
+    "LEGIS DIR": "Legislative Director",
+    "LEGISL": "Legislative",
+    "LEGISLA": "Legislative",
+    "LEGISLAT": "Legislative",
+    "LEGISLATI": "Legislative",
+    "LEGISLATIV": "Legislative",
+    "LEGISLATIVE AI": "Legislative Aide",
+    "LEGISLATIVE ASSIST": "Legislative Assistant",
+    "LEGISLATIVE ASST": "Legislative Assistant",
+    "LEGISLATIVE CORR": "Legislative Correspondent",
+    "LEGISLATIVE CORRES": "Legislative Correspondent",
+    "LEGISLATIVE DIR": "Legislative Director",
+    "OPS COORDINATOR": "Operations Coordinator",
+    "OUTREACH COOR": "Outreach Coordinator",
+    "OUTREACH COORD": "Outreach Coordinator",
+    "PRESS ASSIST": "Press Assistant",
+    "PRESS ASST": "Press Assistant",
+    "PRESS SEC": "Press Secretary",
+    "PROFESSIONAL STAFF": "Professional Staff Member",
+    "SA": "Staff Assistant",
+    "SR ADVISOR": "Senior Advisor",
+    "SR CASEWORKER": "Senior Caseworker",
+    "SR POLICY ADVISOR": "Senior Policy Advisor",
+    "STAFF ASSI": "Staff Assistant",
+    "STAFF ASSIST": "Staff Assistant",
+    "STAFF ASST": "Staff Assistant",
+}
+
+def title_group_key(title):
+    """Canonical title used to pool spelling/abbreviation variants for
+    stats — NOT for display. See TITLE_MERGE_ALIASES."""
+    return TITLE_MERGE_ALIASES.get(title.strip().upper(), title.strip())
+
+# Office names with an unambiguous fix — either a plain typo/abbreviation
+# ("OFCR" -> "OFFICER", a doubled letter), or multiple raw spellings that are
+# indisputably the same entity (inconsistent spacing/ampersand use around
+# the same words). Deliberately does NOT include cases where a committee
+# was renamed by an act of Congress (e.g. Oversight and Reform -> Oversight
+# and Accountability in the 118th) — collapsing those changes what "the
+# same office" means across a real historical event, which is a bigger
+# call than a typo fix and shouldn't be made silently.
+OFFICE_NAME_FIXUPS = {
+    "CHIEF ADMIN OFCR OF THE HOUSE": "CHIEF ADMINISTRATIVE OFFICER OF THE HOUSE",
+    "JOINT COMMMITTEE ON TAXATION": "JOINT COMMITTEE ON TAXATION",
+    "COMM ON SCIENCE  SPACE & TECH": "COMMITTEE ON SCIENCE, SPACE, AND TECHNOLOGY",
+    "COMM ON SCIENCE SPACE&TECH": "COMMITTEE ON SCIENCE, SPACE, AND TECHNOLOGY",
+    "COMMITTEE ON FINANCIAL SERVICE": "COMMITTEE ON FINANCIAL SERVICES",
+}
+
+def strip_org_prefix(org):
+    """ORGANIZATION values carry a leading year stamp that varies in form —
+    sometimes a bare "NNNN ", sometimes "FISCAL YEAR NNNN " — even for the
+    same office within the same quarter. Every place that groups by office
+    must strip both forms the same way, or the same real office silently
+    fragments into two keys (and, worse, a person paid under both variants
+    gets flagged as a "shared" employee and excluded from every stat)."""
+    cleaned = re.sub(r"^FISCAL YEAR \d{4}\s*", "", re.sub(r"^\d{4}\s+", "", org)).strip()
+    return OFFICE_NAME_FIXUPS.get(cleaned, cleaned)
+
+# Committees Congress itself renamed (control changed hands, name changed
+# with it) — unlike OFFICE_NAME_FIXUPS above, these should NOT change what
+# gets displayed for a given quarter (a 2021 staffer worked at "Oversight
+# and Reform," not "Oversight and Accountability," and per-quarter views
+# should say so). This only affects PERSON_MERGE_KEY below: the key used to
+# decide whether two stints are "the same office" for tenure-continuity
+# purposes, so a staffer who was there through the rename doesn't look like
+# they left one committee and joined a brand new one.
+COMMITTEE_RENAME_MERGE = {
+    "COMMITTEE ON OVERSIGHT AND ACCOUNTABILITY": "COMMITTEE ON OVERSIGHT",
+    "COMMITTEE ON OVERSIGHT AND REFORM": "COMMITTEE ON OVERSIGHT",
+    "COMMITTEE ON EDUCATION AND WORKFORCE": "COMMITTEE ON EDUCATION",
+    "COMMITTEE ON EDUCATION AND LABOR": "COMMITTEE ON EDUCATION",
+    "VETERANS' AFFAIRS": "COMMITTEE ON VETERANS AFFAIRS",
+    "COMMITTEE ON VETERANS AFFAIRS": "COMMITTEE ON VETERANS AFFAIRS",
+}
+
+def person_merge_key(org_key):
+    """The key used for (name, office) grouping in people_index — merges
+    known committee renames so tenure tracking treats them as one office,
+    while org_key itself (used for actual per-quarter display) is untouched."""
+    return COMMITTEE_RENAME_MERGE.get(org_key, org_key)
+
+def percentile(data, p):
+    if not data:
+        return 0
+    s = sorted(data)
+    idx = (len(s) - 1) * p / 100
+    lo, hi = int(idx), min(int(idx) + 1, len(s) - 1)
+    return s[lo] + (s[hi] - s[lo]) * (idx - lo)
+
+def compute_stats(amounts):
+    if not amounts:
+        return {"count": 0, "median": 0, "p25": 0, "p75": 0, "p10": 0, "p90": 0, "mean": 0, "min": 0, "max": 0}
+    s = sorted(amounts)
+    return {
+        "count": len(s),
+        "median": round(percentile(s, 50)),
+        "p25": round(percentile(s, 25)),
+        "p75": round(percentile(s, 75)),
+        "p10": round(percentile(s, 10)),
+        "p90": round(percentile(s, 90)),
+        "mean": round(sum(s) / len(s)),
+        "min": round(s[0]),
+        "max": round(s[-1]),
+    }
+
+def distribution_buckets(amounts, bucket_size=10000, max_val=250000):
+    buckets = []
+    for lo in range(0, max_val, bucket_size):
+        hi = lo + bucket_size
+        count = sum(1 for a in amounts if lo <= a < hi)
+        buckets.append({"min": lo, "max": hi, "count": count})
+    # Always include the overflow bucket, even at 0, so bucket count/width stays
+    # consistent across quarters/subsets that happen to have nobody above max_val.
+    overflow = sum(1 for a in amounts if a >= max_val)
+    buckets.append({"min": max_val, "max": None, "count": overflow})
+    return buckets
+
+def fetch_quarter(q):
+    print(f"  Fetching {q['id']} ({q['label']})...", flush=True)
+    # Some pre-2021 filenames contain literal spaces (house.gov never
+    # percent-encoded them) — urlopen rejects those as control characters,
+    # so re-encode the path defensively. `safe="/%"` leaves already-encoded
+    # URLs (the common case) unchanged instead of double-encoding them.
+    parts = urllib.parse.urlsplit(q["url"])
+    safe_url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, urllib.parse.quote(parts.path, safe="/%"), parts.query, parts.fragment))
+    req = urllib.request.Request(safe_url, headers={"User-Agent": "house-salaries-bot/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        print(f"  ERROR: {e}", flush=True)
+        return None
+
+    reader = csv.DictReader(io.StringIO(raw))
+    # Strip trailing whitespace from all column names (CSV has padded headers)
+    reader.fieldnames = [f.strip() for f in (reader.fieldnames or [])]
+
+    # key = (vendor_name, organization) → {amount, title}
+    payments = defaultdict(lambda: {"amount": 0.0, "title": "", "org": ""})
+
+    for row in reader:
+        row = {k.strip(): v.strip() for k, v in row.items()}
+        if row.get("SORT SUBTOTAL DESCRIPTION") != "PERSONNEL COMPENSATION":
+            continue
+        if row.get("SORT SEQUENCE") != "DETAIL":
+            continue
+        try:
+            amount = float(row.get("AMOUNT", "0").replace(",", ""))
+        except ValueError:
+            continue
+        if amount <= 0:
+            continue
+        vendor = row.get("VENDOR NAME", "").strip()
+        org = row.get("ORGANIZATION", "").strip()
+        title = normalize_title(row.get("DESCRIPTION", ""))
+        if not vendor or not org:
+            continue
+        # Normalize org: strip leading year so "2025 HON. X" and "2026 HON. X" merge
+        org_key = strip_org_prefix(org).upper()
+        key = (vendor, org_key)
+        payments[key]["amount"] += amount
+        payments[key]["org"] = org  # keep most recent raw name for display
+        if not payments[key]["title"]:
+            payments[key]["title"] = title
+
+    # Detect shared employees: same vendor name appears under multiple offices
+    vendor_orgs = defaultdict(set)
+    for (vendor, org) in payments:
+        vendor_orgs[vendor].add(org)
+    shared_vendors = {v for v, orgs in vendor_orgs.items() if len(orgs) > 1}
+
+    employees = []
+    for (vendor, org), data in payments.items():
+        total = data["amount"]
+        if total <= 0:
+            continue
+        title = title_case(data["title"])
+        otype = classify_office(data["org"])
+        employees.append({
+            "name": fmt_name(vendor),
+            "office": data["org"],
+            "type": otype,
+            "party": party_for(strip_org_prefix(data["org"]), otype),
+            "leadership_party": leadership_party_for(data["org"]) if otype == "leadership" else None,
+            "title": title,
+            "title_group": title_group_key(title),
+            "intern": is_intern(title),
+            "shared": vendor in shared_vendors,
+            "quarterly_pay": round(total),
+            "annual_equiv": round(total * 4),
+        })
+
+    return employees
+
+def process_all(quarters_to_process=None):
+    qs = quarters_to_process or QUARTERS
+    quarter_summaries = []
+    all_employees_latest = None
+    latest_id = None
+    # key: (fmt_name, org_key) → {meta, history:[]}
+    people_index = defaultdict(lambda: {"name":"","office":"","title":"","title_group":"","type":"","history":[]})
+
+    for q in qs:
+        employees = fetch_quarter(q)
+        if employees is None:
+            continue
+
+        # Separate interns from regular staff; exclude shared employees from stats
+        interns = [e for e in employees if e["intern"]]
+        staff = [e for e in employees if not e["intern"] and not e["shared"] and e["annual_equiv"] >= HOUSE_MIN_ANNUAL]
+
+        staff_amts = [e["annual_equiv"] for e in staff]
+        by_type = defaultdict(list)
+        by_title = defaultdict(list)
+        for e in staff:
+            by_type[e["type"]].append(e["annual_equiv"])
+            if e["title"]:
+                by_title[e["title_group"]].append(e["annual_equiv"])
+
+        # Top titles by count (min 2 staff)
+        top_titles = sorted(
+            [(t, compute_stats(v)) for t, v in by_title.items() if len(v) >= 2],
+            key=lambda x: -x[1]["count"]
+        )[:200]
+
+        # Top offices by staff count (for trend charts)
+        by_office = defaultdict(list)
+        for e in staff:
+            key = strip_org_prefix(e["office"])
+            by_office[key].append(e["annual_equiv"])
+        by_office_pay = defaultdict(float)
+        for e in staff:
+            key = strip_org_prefix(e["office"])
+            by_office_pay[key] += e["quarterly_pay"]
+        top_offices = sorted(
+            [{"name": name, "type": classify_office(name),
+              "party": party_for(name, classify_office(name)),
+              "leadership_party": leadership_party_for(name) if classify_office(name) == "leadership" else None,
+              "total_quarterly_pay": round(by_office_pay[name]), **compute_stats(v)}
+             for name, v in by_office.items()],
+            key=lambda x: -x["count"]
+        )
+
+        summary = {
+            "id": q["id"],
+            "label": q["label"],
+            "year": q["year"],
+            "quarter": q["q"],
+            "overall": compute_stats(staff_amts),
+            "intern_count": len(interns),
+            "total_count": len(employees),
+            "distribution": distribution_buckets(staff_amts),
+            "by_type": {t: compute_stats(v) for t, v in by_type.items()},
+            "top_titles": [{"title": t, **s} for t, s in top_titles],
+            "top_offices": top_offices,
+        }
+        quarter_summaries.append(summary)
+
+        # Build people history index (non-intern, non-shared only). QUARTERS
+        # is newest-first, so the first time we see a given (name, org_key)
+        # pair is their *most recent* quarter — only snapshot title/type
+        # then, so someone who's since changed titles is filed under their
+        # current one, not whatever they held furthest back in history.
+        # history still accumulates every quarter regardless of title.
+        #
+        # The key normalizes the name rather than using it raw. SOD spelling
+        # drifts between quarters — most often a middle initial gaining or
+        # losing its period — and the 2016-2020 backfill sits on the wrong
+        # side of one such shift, so keying on the raw string split 1,301
+        # careers in two and handed each half a fragment of the history.
+        # That understated tenure for 472 current staff by a median of 9
+        # quarters (worst: 20), which fed straight through to the tenure
+        # percentile, the office tenure sort and the salary-vs-tenure chart.
+        # Display still uses e["name"] below, so the most recent spelling is
+        # what's shown; only the identity key is normalized.
+        for e in employees:
+            if e["intern"] or e["shared"]:
+                continue
+            org_key = strip_org_prefix(e["office"])
+            pk = (normalize_name(e["name"]), person_merge_key(org_key))
+            p = people_index[pk]
+            if not p["history"]:
+                p["name"] = e["name"]
+                p["office"] = org_key
+                p["title"] = e["title"]
+                p["title_group"] = e["title_group"]
+                p["type"] = e["type"]
+                p["party"] = e["party"]
+                p["leadership_party"] = e["leadership_party"]
+            p["history"].append({"quarter": q["id"], "quarterly_pay": e["quarterly_pay"], "title": e["title"]})
+
+        if all_employees_latest is None:
+            all_employees_latest = employees
+            latest_id = q["id"]
+
+        print(f"    → {len(employees)} employees, median annual equiv ${summary['overall']['median']:,}", flush=True)
+
+    # Only keep people who appear in 3+ quarters (history is in reverse-chron order from QUARTERS list)
+    people_list = []
+    for v in people_index.values():
+        if len(v["history"]) < 3:
+            continue
+        chron = list(reversed(v["history"]))  # oldest first
+        # Per-quarter title repeats heavily — most staff hold 1-3 titles
+        # across dozens of quarters — so it's run-length-encoded into a
+        # separate `titles` array (title + the quarter range it covered)
+        # instead of stored on every single history entry. Same shape the
+        # frontend's chart-segment code used to compute client-side; doing
+        # it once here both shrinks the payload and removes that client
+        # computation. `history` itself keeps every quarter's pay, since
+        # both the personal chart and cross-person title-trend aggregation
+        # need the full quarterly series, not just recent quarters.
+        titles = []
+        for h in chron:
+            if titles and titles[-1]["title"] == h["title"]:
+                titles[-1]["to"] = h["quarter"]
+            else:
+                titles.append({"from": h["quarter"], "to": h["quarter"], "title": h["title"]})
+        people_list.append({
+            **v,
+            "history": [{"quarter": h["quarter"], "quarterly_pay": h["quarterly_pay"]} for h in chron],
+            "titles": titles,
+        })
+    people_list.sort(key=lambda p: p["name"])
+
+    return quarter_summaries, all_employees_latest, latest_id, people_list
+
+def fetch_cpi_index(start_year, end_year):
+    """Fetch BLS CPI-U (U.S. city average, all items, not seasonally adjusted —
+    series CUUR0000SA0) and return {(year, quarter): avg_cpi_that_quarter}.
+    Uses the public API (no key needed for a handful of years); a missing
+    month (e.g. a data-collection gap) is just skipped from that quarter's
+    average rather than failing the whole fetch."""
+    url = (f"https://api.bls.gov/publicAPI/v2/timeseries/data/CUUR0000SA0"
+           f"?startyear={start_year}&endyear={end_year}")
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            payload = json.loads(r.read())
+    except Exception as e:
+        print(f"  ! CPI fetch failed ({e}) — inflation adjustment will be unavailable", flush=True)
+        return {}
+
+    by_ym = {}
+    for series in payload.get("Results", {}).get("series", []):
+        for row in series.get("data", []):
+            v = row.get("value")
+            if v in (None, "-"): continue
+            period = row.get("period", "")
+            if not period.startswith("M"): continue  # skip annual-average pseudo-rows
+            by_ym[(int(row["year"]), int(period[1:]))] = float(v)
+
+    quarter_months = {1: (1,2,3), 2: (4,5,6), 3: (7,8,9), 4: (10,11,12)}
+    cpi_by_q = {}
+    for year in range(start_year, end_year + 1):
+        for q, months in quarter_months.items():
+            vals = [by_ym[(year, m)] for m in months if (year, m) in by_ym]
+            if vals:
+                cpi_by_q[(year, q)] = round(sum(vals) / len(vals), 3)
+    return cpi_by_q
+
+def apply_suppressions(latest_employees, people_list):
+    """Remove opted-out people from the row-level outputs.
+
+    A stale entry — one whose digests match nobody — is fatal, not a warning.
+    It means a person who asked to be left off is about to be published again,
+    most likely because their name is spelled differently in newer source
+    data than when they opted out. Failing the build leaves the previous
+    deploy (which still honors the opt-out) in place; continuing would push
+    their row back onto the live site. scripts/suppress.py --recheck resolves
+    it by re-scanning for the spellings now present.
+    """
+    doc = suppression.load()
+    if not doc.get("entries"):
+        return latest_employees, people_list
+
+    pepper = suppression.get_pepper()
+    matched = set()
+
+    if latest_employees:
+        latest_employees, m = suppression.apply(
+            latest_employees, doc, pepper,
+            name_of=lambda e: e["name"],
+            office_of=lambda e: person_merge_key(strip_org_prefix(e["office"])))
+        matched |= m
+
+    people_list, m = suppression.apply(
+        people_list, doc, pepper,
+        name_of=lambda p: p["name"],
+        office_of=lambda p: person_merge_key(p["office"]))
+    matched |= m
+
+    stale = suppression.check_stale(doc, matched)
+    if stale:
+        added = ", ".join(e.get("added", "?") for e in stale)
+        raise SystemExit(
+            f"FATAL: {len(stale)} suppression entry/entries matched nobody (added: {added}).\n"
+            "Someone who opted out would be republished. Run\n"
+            "  python scripts/suppress.py --recheck\n"
+            "to pick up their current spelling, then rebuild.")
+
+    print(f"Applied {len(doc['entries'])} opt-out suppression(s) to row-level data.", flush=True)
+    return latest_employees, people_list
+
+def main():
+    os.makedirs("data", exist_ok=True)
+
+    print("Fetching Clerk member roster for party affiliation...", flush=True)
+    build_member_party_lookup()
+
+    print("Processing quarters...", flush=True)
+    quarter_summaries, latest_employees, latest_id, people_list = process_all()
+
+    quarter_summaries.sort(key=lambda q: (q["year"], q["quarter"]))
+
+    # Opt-outs are applied HERE, deliberately after process_all() has already
+    # computed every aggregate in quarter_summaries. Medians, percentiles and
+    # distributions are therefore calculated over the full roster and don't
+    # move when someone opts out — only the row-level files below lose them.
+    # Reversing this order would mean the site's statistics quietly degraded
+    # with each request honored.
+    latest_employees, people_list = apply_suppressions(latest_employees, people_list)
+
+    if quarter_summaries:
+        years = [q["year"] for q in quarter_summaries]
+        print("Fetching CPI (BLS CUUR0000SA0) for inflation adjustment...", flush=True)
+        cpi_by_q = fetch_cpi_index(min(years), max(years))
+        for q in quarter_summaries:
+            q["cpi"] = cpi_by_q.get((q["year"], q["quarter"]))
+
+    summary = {
+        "updated": __import__("datetime").date.today().isoformat(),
+        "latest_quarter": latest_id,
+        "quarters": quarter_summaries,
+    }
+
+    with open("data/summary.json", "w") as f:
+        json.dump(summary, f, separators=(",", ":"))
+    print(f"Wrote data/summary.json ({os.path.getsize('data/summary.json'):,} bytes)", flush=True)
+
+    if latest_employees:
+        latest_employees.sort(key=lambda e: -e["annual_equiv"])
+        with open("data/employees.json", "w") as f:
+            json.dump({"quarter": latest_id, "employees": latest_employees}, f, separators=(",", ":"))
+        print(f"Wrote data/employees.json ({os.path.getsize('data/employees.json'):,} bytes)", flush=True)
+
+    # Cloudflare Pages rejects any deployed file over 25 MiB — a single
+    # people.json blew past that once the 2016 backfill roughly doubled the
+    # tracked history (28MB). Shard it instead, sized with headroom (8MiB
+    # target) so a few more years of quarterly growth doesn't require
+    # resharding again immediately. app.js's loadPeople() fetches the
+    # manifest, then every shard in parallel, and concatenates them — order
+    # doesn't matter since nothing depends on people_list's sort position.
+    people_bytes = len(json.dumps({"people": people_list}, separators=(",", ":")).encode("utf-8"))
+    TARGET_SHARD_BYTES = 8 * 1024 * 1024
+    n_shards = max(1, math.ceil(people_bytes / TARGET_SHARD_BYTES))
+    shard_size = math.ceil(len(people_list) / n_shards)
+    old_people_json = "data/people.json"
+    if os.path.exists(old_people_json):
+        os.remove(old_people_json)  # superseded by the shards below
+    for i in range(n_shards):
+        chunk = people_list[i*shard_size:(i+1)*shard_size]
+        with open(f"data/people-{i}.json", "w") as f:
+            json.dump({"people": chunk}, f, separators=(",", ":"))
+    with open("data/people-manifest.json", "w") as f:
+        json.dump({"shards": n_shards}, f)
+    print(f"Wrote {n_shards} people-N.json shard(s) ({people_bytes:,} bytes total, {len(people_list):,} people)", flush=True)
+
+MONTH_TO_Q = {
+    "JAN": 1, "JANUARY": 1, "FEB": 1, "FEBRUARY": 1, "MAR": 1, "MARCH": 1,
+    "APR": 2, "APRIL": 2, "MAY": 2, "JUN": 2, "JUNE": 2,
+    "JUL": 3, "JULY": 3, "AUG": 3, "AUGUST": 3, "SEP": 3, "SEPT": 3, "SEPTEMBER": 3,
+    "OCT": 4, "OCTOBER": 4, "NOV": 4, "NOVEMBER": 4, "DEC": 4, "DECEMBER": 4,
+}
+Q_LABELS = {1: "Jan–Mar", 2: "Apr–Jun", 3: "Jul–Sep", 4: "Oct–Dec"}
+
+SOD_PAGE = "https://www.house.gov/the-house-explained/open-government/statement-of-disbursements"
+
+def url_to_quarter(path):
+    """Return (qid, label, year, q) from a SOD CSV path, or None if unparseable."""
+    tokens = re.findall(r'[A-Z]+|\d{4}', path.upper())
+    year = next((int(t) for t in tokens if len(t) == 4 and t.isdigit()), None)
+    q = next((MONTH_TO_Q[t] for t in tokens if t in MONTH_TO_Q), None)
+    if not year or not q:
+        return None
+    return f"{year}Q{q}", f"{Q_LABELS[q]} {year}", year, q
+
+def discover_new_quarters():
+    """Scrape SOD page, return list of new quarter dicts not already in QUARTERS."""
+    known_ids = {x["id"] for x in QUARTERS}
+    print(f"Checking {SOD_PAGE} for new quarters…", flush=True)
+    with urllib.request.urlopen(SOD_PAGE) as r:
+        html = r.read().decode("utf-8", errors="replace")
+
+    # Find all DETAIL CSV hrefs (skip SUMMARY)
+    paths = re.findall(r'href="(/sites/default/files/[^"]*SOD[^"]*DETAIL[^"]*\.csv)"', html, re.I)
+    new = []
+    seen = set()
+    for path in paths:
+        parsed = url_to_quarter(path)
+        if not parsed:
+            continue
+        qid, label, year, q = parsed
+        if qid in known_ids or qid in seen:
+            continue
+        seen.add(qid)
+        new.append({"id": qid, "label": label, "year": year, "q": q,
+                    "url": f"{BASE}{path}"})
+    return new
+
+def add_quarters(new_quarters):
+    """Prepend new quarter entries to the QUARTERS list in this source file."""
+    if not new_quarters:
+        print("No new quarters found.")
+        return
+    path = os.path.abspath(__file__)
+    src = open(path).read()
+    marker = "QUARTERS = [\n"
+    idx = src.index(marker) + len(marker)
+    entries = ""
+    for nq in sorted(new_quarters, key=lambda x: (x["year"], x["q"]), reverse=True):
+        rel = nq["url"].replace(BASE, "")
+        entries += f'    {{"id": "{nq["id"]}", "label": "{nq["label"]}", "year": {nq["year"]}, "q": {nq["q"]}, "url": f"{{BASE}}{rel}"}},\n'
+        print(f"Adding {nq['id']} ({nq['label']})", flush=True)
+    open(path, "w").write(src[:idx] + entries + src[idx:])
+
+
+if __name__ == "__main__":
+    new = discover_new_quarters()
+    if new:
+        add_quarters(new)
+        # Splice the new entries into the in-memory list directly rather than
+        # re-executing the rewritten source to pick them up. The old approach
+        # ran exec() against a bare namespace, which has no __file__ — so the
+        # moment this module grew a line using __file__ at import time, the
+        # reload died with a NameError. Worse, that path only runs when a new
+        # quarter is actually found, so the breakage stayed invisible from the
+        # day it was introduced until the next quarterly publication.
+        #
+        # add_quarters() writes them newest-first at the top of QUARTERS, so
+        # prepending the same sorted list reproduces the file exactly.
+        QUARTERS[:] = sorted(new, key=lambda x: (x["year"], x["q"]), reverse=True) + QUARTERS
+    main()

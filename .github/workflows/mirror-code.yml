@@ -1,0 +1,106 @@
+name: Mirror code to the public repo
+
+# This repository is private because its history shows who asked to be removed:
+# data/ holds the built files, so the commit after each opt-out is a diff of
+# exactly the person taken out, and every earlier commit still has their row.
+#
+# The code is public all the same, at buckler-rougher/house-salaries. This job
+# copies everything except data/ there whenever the code changes. The public
+# repo gets its own plain history (one commit per change here), never this
+# one's, so nothing under data/ can reach it by any route.
+
+on:
+  push:
+    branches: [main]
+    # A push that only touches data/ (the weekly update, an opt-out) has no
+    # code to copy and does not start this job at all.
+    paths-ignore:
+      - "data/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-code
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      PUBLIC_REPO: buckler-rougher/house-salaries
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: private
+
+      - name: Load the push key for the public repo
+        # A deploy key that can write to the public repo and nothing else.
+        env:
+          MIRROR_DEPLOY_KEY: ${{ secrets.MIRROR_DEPLOY_KEY }}
+        run: |
+          if [ -z "$MIRROR_DEPLOY_KEY" ]; then
+            echo "::error::MIRROR_DEPLOY_KEY is not set, so the public repo cannot be updated."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$MIRROR_DEPLOY_KEY" > ~/.ssh/mirror
+          chmod 600 ~/.ssh/mirror
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/mirror -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+
+      - name: Copy the code
+        run: |
+          git clone --quiet "git@github.com:${PUBLIC_REPO}.git" public
+          # An empty public repo has no branch yet.
+          git -C public checkout --quiet -B main
+          # Everything tracked here except data/. --delete removes from the
+          # public copy whatever was removed here. The note in data/ is the
+          # public repo's own file and is written fresh each time.
+          git -C private ls-files -z | grep -zv '^data/' > files.list
+          find public -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          rsync -a --from0 --files-from=files.list private/ public/
+          mkdir -p public/data
+          cat > public/data/README.md <<'NOTE'
+          # data/
+
+          The built data files are not kept in this repository. They are made
+          from the House's Statement of Disbursements by:
+
+              python scripts/fetch_sod.py
+
+          This repository is a copy of the site's code. The site is deployed
+          from a private repository that also holds the built files and the
+          list of removal requests, because a public history of those files
+          would show who asked to be removed.
+          NOTE
+
+      - name: Refuse to publish anything from data/
+        # A second lock, in case the list above is ever edited carelessly.
+        run: |
+          extra=$(cd public && find data -type f ! -name README.md | head -5)
+          if [ -n "$extra" ]; then
+            echo "::error::Files from data/ were about to be published: $extra"
+            exit 1
+          fi
+
+      - name: Commit and push if the code changed
+        run: |
+          cd public
+          git add -A
+          if git diff --staged --quiet; then
+            echo "The public repo already matches."
+            exit 0
+          fi
+          # The message of the change here, unless that commit was about a
+          # removal: those say nothing in public.
+          subject=$(git -C ../private log -1 --format=%s)
+          if git -C ../private log -1 --format=%B | grep -qiE 'opt-?out request|suppress'; then
+            subject="Update code"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --quiet -m "$subject"
+          git push --quiet origin main
+          echo "Published: $subject"

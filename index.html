@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>House Staff Salaries</title>
+  <meta name="description" content="Salary data for U.S. House of Representatives staff." />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="House Staff Salaries" />
+  <meta property="og:description" content="Salary data for U.S. House of Representatives staff." />
+  <meta property="og:url" content="https://house-salaries.evanhollander.org/" />
+  <meta property="og:image" content="https://house-salaries.evanhollander.org/social.png?v=20260715ag" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="House Staff Salaries" />
+  <meta name="twitter:description" content="Salary data for U.S. House of Representatives staff." />
+  <meta name="twitter:image" content="https://house-salaries.evanhollander.org/social.png?v=20260715ag" />
+  <link rel="icon" href="favicon.ico?v=20260715ag" sizes="any" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20260715ag" />
+  <link rel="apple-touch-icon" href="favicon.png?v=20260715ag" />
+  <link rel="stylesheet" href="styles.css?v=20261018f" />
+</head>
+<body>
+
+
+<div id="loading" class="loading-screen"><div class="loading-wordmark">House Staff Salaries</div><div class="loading-bar"><div class="loading-fill"></div></div></div>
+
+<div id="app" style="display:none">
+
+  <div class="hero">
+    <div class="hero-top">
+      <h1 class="hero-title wordmark"><span class="logo-mark" aria-hidden="true"><img class="logo-mark-img" src="logo-mark.svg?v=20260715ag" alt="" draggable="false" /></span>House Staff <span class="wordmark-accent">Salaries</span></h1>
+      <button id="suggest-fab" aria-label="Open suggestion box">Suggestion Box</button>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="hero-stat-num"><span class="prefix">$</span><span id="stat-median">—</span></div>
+        <div class="hero-stat-label">Median salary</div>
+        <div class="hero-stat-sub">annualized · full-time staff</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-num"><span class="prefix">$</span><span id="stat-mean">—</span></div>
+        <div class="hero-stat-label">Average salary</div>
+        <div class="hero-stat-sub">annualized · full-time staff</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-num" id="stat-count">—</div>
+        <div class="hero-stat-label">Staff on payroll</div>
+        <div class="hero-stat-sub" id="stat-intern-note">—</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-num quarter-nav">
+          <button class="qnav-btn" id="qnav-prev" aria-label="Previous quarter">&#8249;</button>
+          <span id="stat-quarter">—</span>
+          <button class="qnav-btn" id="qnav-next" aria-label="Next quarter">&#8250;</button>
+        </div>
+        <div class="hero-stat-label" id="stat-quarter-label">Latest quarter</div>
+        <div class="hero-stat-sub">updated <span id="stat-updated">—</span></div>
+      </div>
+    </div>
+    <div id="q4-notice" style="display:none" class="q4-notice"></div>
+  </div>
+
+  <div id="type-filter-sentinel" style="height:1px"></div>
+  <div class="type-filter-row" id="type-filter-row">
+    <span class="type-filter-label">Office type:</span>
+    <button class="type-filter-btn active" data-type="">All</button>
+    <button class="type-filter-btn" data-type="member">Member</button>
+    <button class="type-filter-btn" data-type="committee">Committee</button>
+    <button class="type-filter-btn" data-type="leadership">Leadership</button>
+    <button class="type-filter-btn" data-type="administrative">Administrative</button>
+    <span class="party-filter-inline" id="party-filter-inline">
+      <button class="party-filter-btn party-filter-all active" data-party="" aria-label="All parties">All</button>
+      <button class="party-filter-btn party-filter-d" data-party="D" aria-label="Democrat">D</button>
+      <button class="party-filter-btn party-filter-r" data-party="R" aria-label="Republican">R</button>
+      <button class="party-filter-btn party-filter-i" data-party="I" id="party-filter-i-btn" aria-label="Independent">I</button>
+    </span>
+    <span class="filter-row-divider" aria-hidden="true"></span>
+    <button class="type-filter-btn" id="inflation-toggle" type="button" aria-pressed="false">Adjust for inflation</button>
+    <span class="inflation-note" id="inflation-note"></span>
+  </div>
+
+  <div class="body-grid">
+
+    <!-- Left: position lookup -->
+    <div class="lookup">
+      <div>
+        <div class="lookup-heading">Look up a position</div>
+        <div id="pos-type-note" class="trend-q-note" style="display:none;margin-bottom:10px">Position stats by office type are only available for the latest quarter — showing all types.</div>
+        <div class="pos-input-wrap">
+          <input type="search" id="pos-search" class="pos-input" placeholder="" autocomplete="off" />
+          <span class="pos-placeholder" id="pos-placeholder" aria-hidden="true">e.g.&nbsp;<span id="pos-placeholder-word">Legislative Assistant…</span></span>
+        </div>
+        <div id="pos-results" class="pos-results"></div>
+      </div>
+
+      <p id="lookup-hint" class="lookup-hint">
+        Search your job title to see the salary range across all House offices — median, 25th and 75th percentile, min and max.
+      </p>
+    </div>
+
+    <!-- Right: tabs -->
+    <div class="right-panel">
+      <div class="tab-nav">
+        <button class="tab-btn active" data-tab="dist">Distribution</button>
+        <button class="tab-btn" data-tab="type">By Office</button>
+        <button class="tab-btn" data-tab="typebars">By Type</button>
+        <button class="tab-btn" data-tab="trend">Trends</button>
+        <button class="tab-btn" data-tab="table">All staff</button>
+      </div>
+
+      <div class="tab-pane active" id="tab-dist">
+        <div class="pane-label" id="dist-pane-label">Annual salary equivalent — full-time staff — latest quarter</div>
+        <div id="dist-type-note" class="trend-q-note" style="display:none;margin-bottom:10px">Distribution by office type is only available for the latest quarter — showing all types.</div>
+        <div class="chart-wrap"><div id="chart-dist" class="chart-svg-wrap"></div></div>
+      </div>
+
+      <div class="tab-pane" id="tab-type">
+        <div class="office-toolbar">
+          <input type="search" id="office-search" class="t-input" placeholder="Search offices…" style="max-width:280px" />
+          <select id="office-sort" class="t-select">
+            <option value="max">Sort by highest pay</option>
+            <option value="median">Sort by median pay</option>
+            <option value="mean">Sort by average pay</option>
+            <option value="total">Sort by total payroll</option>
+            <option value="count">Sort by staff count</option>
+            <option value="tenure">Sort by staff tenure</option>
+            <option value="name">Sort alphabetically</option>
+          </select>
+        </div>
+        <div id="office-list"></div>
+      </div>
+
+      <div class="tab-pane" id="tab-typebars">
+        <div class="pane-label">Median pay + 25th–75th percentile range by office type</div>
+        <div class="type-bars" id="type-bars"></div>
+      </div>
+
+      <div class="tab-pane" id="tab-trend">
+        <div class="trend-mode-row">
+          <button class="trend-mode active" data-mode="overall">Overall</button>
+          <button class="trend-mode" data-mode="type">By office type</button>
+        </div>
+
+        <!-- Metric controls (Overall + By office type both use these) -->
+        <div id="trend-overall-ctrl" class="trend-pills">
+          <button class="pill active" data-metric="median">Median</button>
+          <button class="pill" data-metric="mean">Average</button>
+          <button class="pill" data-metric="p75">75th pct.</button>
+          <button class="pill" data-metric="p25">25th pct.</button>
+        </div>
+
+        <!-- Quarter filter (shared across modes) -->
+        <div class="trend-q-row">
+          <span class="trend-q-label">Compare:</span>
+          <button class="trend-q active" data-q="0">All quarters</button>
+          <button class="trend-q" data-q="1">Q1 Jan–Mar</button>
+          <button class="trend-q" data-q="2">Q2 Apr–Jun</button>
+          <button class="trend-q" data-q="3">Q3 Jul–Sep</button>
+          <button class="trend-q" data-q="4">Q4 Oct–Dec</button>
+        </div>
+        <div id="trend-q-note" class="trend-q-note">Q4 (Oct–Dec) often includes year-end bonuses and lump-sum payments that inflate salaries. Comparing Q1–Q3 across years gives a cleaner picture.</div>
+
+        <div class="chart-wrap tall"><div id="chart-trend" class="chart-svg-wrap"></div></div>
+
+        <div class="emp-detail-section" style="margin-top:20px">Salary by tenure · latest quarter</div>
+        <div class="chart-wrap" id="chart-tenure-wrap"><div id="chart-tenure" class="chart-svg-wrap"></div></div>
+      </div>
+
+      <div class="tab-pane" id="tab-table">
+        <div id="table-quarter-note" class="trend-q-note" style="display:none;margin-bottom:10px">Historical records are missing some staff. Titles and offices always reflect the most current versions.</div>
+        <div id="table-content">
+          <div class="table-bar">
+            <input type="search" id="emp-search" class="t-input" placeholder="Name, office, or title…" />
+            <select id="emp-type" class="t-select">
+              <option value="staff">Staff only</option>
+              <option value="all">Include interns</option>
+              <option value="intern">Interns only</option>
+            </select>
+          </div>
+          <div id="person-missing" class="person-missing" style="display:none"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-sort="name">Name <span class="sort-icon">↕</span></th>
+                  <th>Office</th>
+                  <th>Title</th>
+                  <th>Type</th>
+                  <th data-sort="annual_equiv" class="sorted">Annual est. <span class="sort-icon">↓</span></th>
+                  <th class="th-chevron"></th>
+                </tr>
+              </thead>
+              <tbody id="emp-tbody"></tbody>
+            </table>
+          </div>
+          <div class="table-footer">
+            <span id="table-info"></span>
+            <div id="pagination" class="pagination"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="tab-position">
+        <div id="position-view"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <footer class="site-footer">
+    <div class="site-footer-primary">
+      <span class="site-footer-brand wordmark"><span class="logo-mark" aria-hidden="true"><img class="logo-mark-img" src="logo-mark.svg?v=20260715ag" alt="" draggable="false" /></span>House Staff <span class="wordmark-accent">Salaries</span></span>
+      <span class="site-footer-sep">&middot;</span>
+      <span class="site-footer-copy">&copy; <span id="footer-year"></span> Evan M. Hollander <span class="footer-profile-wrap">(<a class="footer-profile-link" href="https://house-salaries.evanhollander.org/#person=Evan%20M.%20Hollander%7CHON.%20JOHN%20B.%20LARSON" aria-label="View Evan's entry in the database"><svg class="footer-profile-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></svg></a>)</span></span>
+      <span class="site-footer-sep">&middot;</span>
+      <a class="site-footer-link" href="https://opensource.org/licenses/MIT" target="_blank" rel="noopener license">MIT License</a>
+      <span class="site-footer-sep">&middot;</span>
+      <a class="site-footer-link" href="https://github.com/buckler-rougher/house-salaries" target="_blank" rel="noopener">Source Code</a>
+      <span class="site-footer-sep">&middot;</span>
+      <a class="site-footer-link" href="https://house-floor.evanhollander.org" target="_blank" rel="noopener">Floor Monitor</a>
+      <span class="site-footer-sep">&middot;</span>
+      <a class="site-footer-link" href="https://contact.evanhollander.org/?subject=House Staff Salaries" target="_blank" rel="noopener">Contact</a>
+      <span class="site-footer-sep">&middot;</span>
+      <a class="site-footer-link" href="/legal.html">Privacy &amp; Terms</a>
+    </div>
+    <div class="site-footer-secondary">
+      Data: <a href="https://www.house.gov/the-house-explained/open-government/statement-of-disbursements" target="_blank" rel="noopener">Statement of Disbursements of the House</a>. Annual figures = quarterly pay &times; 4 (estimate). Full-time staff = &ge;$45k annual. <span class="footer-note">Inflation adjustment uses <a href="https://www.bls.gov/data/#inflation" target="_blank" rel="noopener">BLS CPI-U</a> (all items, U.S. city average).</span> Member party/photo data from the Clerk of the House's <a href="https://clerk.house.gov/Members" target="_blank" rel="noopener">Member Data</a> and the <a href="https://bioguide.congress.gov" target="_blank" rel="noopener">Biographical Directory of the U.S. Congress</a> (Member Photos). Not affiliated with the U.S. House of Representatives.
+    </div>
+  </footer>
+
+</div>
+
+<!-- Suggestion drawer -->
+<div id="suggest-overlay" class="suggest-overlay" style="display:none"></div>
+<div id="suggest-drawer" class="suggest-drawer" aria-hidden="true" role="dialog" aria-label="Suggestion box">
+  <div class="suggest-drawer-header">
+    <span class="suggest-drawer-title">Suggestion Box</span>
+    <button class="suggest-drawer-close" id="suggest-close" aria-label="Close">&times;</button>
+  </div>
+  <form id="suggest-form" class="suggest-form" novalidate>
+    <input type="text" name="website" class="suggest-hp" tabindex="-1" autocomplete="off" aria-hidden="true" />
+    <input type="hidden" name="ref" value="house-salaries" />
+    <input type="hidden" name="subject" value="House Salaries — Suggestion" />
+    <input type="hidden" name="name" value="Anonymous" />
+    <label class="suggest-label" for="suggest-message">Message <span class="suggest-req">*</span></label>
+    <textarea id="suggest-message" name="message" class="suggest-textarea" rows="5" placeholder="Ideas, corrections, data questions…" required></textarea>
+    <label class="suggest-label" for="suggest-email">Email <span class="suggest-opt">(optional, for follow-up)</span></label>
+    <input type="email" id="suggest-email" name="email" class="suggest-input" placeholder="you@example.com" autocomplete="email" />
+    <div id="suggest-error" class="suggest-error" style="display:none"></div>
+    <p class="suggest-consent">By submitting, you agree to the <a href="javascript:void(0)" id="suggest-privacy-link" class="suggest-privacy-link">use of your data</a>.</p>
+    <button type="submit" class="suggest-submit" id="suggest-submit">Send</button>
+  </form>
+  <div id="suggest-success" class="suggest-success" style="display:none">
+    <div class="suggest-success-icon">✓</div>
+    <div class="suggest-success-msg">Thanks — got it!</div>
+  </div>
+</div>
+
+<!-- Data & privacy modal -->
+<div id="suggest-data-modal" class="suggest-data-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="suggest-data-modal-title">
+  <div class="suggest-data-backdrop" id="suggest-data-backdrop"></div>
+  <div class="suggest-data-box">
+    <button class="suggest-data-close" id="suggest-data-close" aria-label="Close">&times;</button>
+    <h2 id="suggest-data-modal-title" class="suggest-data-title">Data &amp; Privacy</h2>
+    <p class="suggest-data-p">When you submit a suggestion, the following is collected and sent to me by email:</p>
+    <ul class="suggest-data-list">
+      <li>Your message</li>
+      <li>Your email address, if provided</li>
+      <li>Your IP address and the time of submission</li>
+    </ul>
+    <p class="suggest-data-p">This information is used solely to read and respond to your suggestion. It is not stored in a database, not shared with third parties, and not used for marketing.</p>
+    <p class="suggest-data-p">For more, see the <a href="/legal.html#privacy" target="_blank" rel="noopener">full Privacy Policy</a>.</p>
+  </div>
+</div>
+
+<script src="app.js?v=20261018f"></script>
+</body>
+</html>

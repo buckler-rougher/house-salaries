@@ -1,0 +1,1233 @@
+@font-face {
+  font-family: "EMH Grotesk";
+  src: url('https://cdn.evanhollander.org/fonts/EMHGrotesk.woff2') format('woff2-variations'),
+       url('https://cdn.evanhollander.org/fonts/EMHGrotesk.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "EMH Mono";
+  src: url('https://cdn.evanhollander.org/fonts/EMHMono.woff2') format('woff2-variations'),
+       url('https://cdn.evanhollander.org/fonts/EMHMono.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+button, input, select, textarea { font-family: inherit; font-size: inherit; }
+
+:root {
+  /* A wash of the accent, not a slab of it. Mixed from --accent itself so it
+     cannot drift from the brand green. */
+  --selection: color-mix(in srgb, var(--accent) 25%, transparent);
+
+  --font-sans: "EMH Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "EMH Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --bg:     #ffffff;
+  --bg2:    #f7f6f3;
+  --bg3:    #eeece8;
+  --line:   #e8e5df;
+  --ink:    #111111;
+  --ink2:   #444444;
+  --ink3:   #888888;
+  --accent: #1b6f2c;      /* green — nonpartisan, reads as money */
+  --accent2: #e8f3e9;
+  --text:   #111111;
+}
+
+html { font-size: 16px; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Selection ────────────────────────────────────────────────────────────
+   Chrome is not content. Dragging across the hero, a filter bar, or a button
+   only ever leaves half the page highlighted, so selection is off by default
+   and the data opt back in: names, offices, titles, and every figure, which
+   are the things people actually copy out of this site.
+
+   user-select inherits, so each rule below covers its whole subtree and no
+   specificity contest arises. Both the prefixed and unprefixed properties are
+   set because Safari only dropped the prefix in 17.
+
+   Form fields are listed explicitly: inheriting none from an ancestor stops
+   selection inside an <input> in Safari, which would break the salary what-if
+   field and both search boxes. */
+body { -webkit-user-select: none; user-select: none; }
+
+.td-name, .td-office, .td-title,
+.person-link, .office-link, .title-link,
+.emp-comp-title-link, .ed-comp-result-title,
+.emp-detail-name, .emp-detail-meta, .emp-detail-comp-who,
+.office-name-text, .office-count, .office-range,
+.office-detail-member-name, .office-detail-member-meta,
+.office-detail-val, .office-total-payroll,
+.office-staff-name, .office-staff-title, .office-staff-amt,
+.range-card-title, .range-card-count, .range-trio-val,
+.range-bar-label-val, .range-min-max-val,
+.range-staff-name, .range-staff-office, .range-staff-amt,
+.pos-row-name, .pos-row-count, .pos-row-median,
+.type-val, .ed-tenure-val, .type-label-sub,
+#table-info, .site-footer,
+.hero-stat-num:not(.quarter-nav),
+.money,
+/* legal.html shares this stylesheet, and a privacy policy nobody can copy
+   is not a privacy policy. */
+.legal-content {
+  -webkit-user-select: text; user-select: text;
+}
+
+/* A search field should not highlight when someone drags across the page,
+   but its own text has to stay selectable once they are actually in it.
+   Clicking an input focuses it before any drag begins, so keying the rule
+   to :focus gives both. */
+input, textarea { -webkit-user-select: none; user-select: none; }
+input:focus, textarea:focus { -webkit-user-select: text; user-select: text; }
+
+/* Chips and glyphs sit inside those selectable cells but are not part of the
+   value. Excluding them keeps a copied salary as the amount alone, without
+   the over-cap warning, the edit pencil, or a row chevron riding along. */
+.badge, .party-badge, .cap-warn, .ed-salary-pencil,
+.emp-row-chevron, .office-chevron, .sort-icon,
+.wordmark, .site-footer-sep, .footer-profile-wrap, img {
+  -webkit-user-select: none; user-select: none;
+}
+
+/* Chart furniture is chrome: axis ticks, series labels, and the value above
+   a bar all describe the drawing rather than being data to lift out of it.
+   The .money ticks need the extra specificity to lose to this.
+   The slope annotation is the exception. "+$1.4k / yr trend" is a finding,
+   and it reads as one only with its unit, so the whole string selects. */
+svg text, svg tspan, svg text.money, svg tspan.money {
+  -webkit-user-select: none; user-select: none;
+}
+svg text.chart-annot, svg text.chart-annot tspan {
+  -webkit-user-select: text; user-select: text;
+}
+
+/* background-color, not the background shorthand: ::selection only honours a
+   short list of properties, and the shorthand is not on it, so engines are
+   free to drop it and paint their own highlight instead. That is what made
+   the first attempt come out a colour that was not the accent at all.
+   No colour override either. A translucent wash lets each thing underneath
+   keep its own ink, the way a native highlight does. */
+::selection { background-color: var(--selection); }
+::-moz-selection { background-color: var(--selection); }
+
+/* ── Loading screen ── */
+.loading-screen {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--bg); gap: 24px;
+}
+.loading-wordmark {
+  font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink3);
+}
+.loading-bar {
+  width: 120px; height: 2px; background: var(--line); border-radius: 2px; overflow: hidden;
+}
+.loading-fill {
+  height: 100%; width: 40%; background: var(--accent); border-radius: 2px;
+  animation: loadSlide 1s ease-in-out infinite;
+}
+@keyframes loadSlide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+/* ── Quarter nav ── */
+.quarter-nav { position: relative; display: flex; align-items: center; gap: 6px; }
+.qnav-btn {
+  background: none; border: none; padding: 0 2px; cursor: pointer;
+  font-size: 1.4em; line-height: 1; color: var(--ink2);
+  transition: color .12s;
+}
+.qnav-btn:hover:not(:disabled) { color: var(--accent); }
+.qnav-btn:disabled { color: var(--line); cursor: default; }
+/* Pin prev out of flow to the left; give the quarter text a fixed width so
+   next sits at a stable position regardless of which month names are showing
+   (otherwise it could shift out from under a click mid-interaction). */
+#qnav-prev { position: absolute; right: 100%; margin-right: 0; }
+#stat-quarter { display: inline-block; width: 9.5ch; }
+#qnav-next { margin-left: 8px; }
+.quarter-text-sep { padding: 0 .15em; }
+
+
+/* ── Hero ── */
+.hero {
+  padding: 28px 40px 0;
+  border-bottom: 1px solid var(--line);
+}
+.hero-title {
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-weight: 800;
+  letter-spacing: -.03em;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+/* The wordmark, worn at two sizes: full in the header, shrunk into the
+   footer. Only the type scale differs. .logo-mark and .logo-mark-img are
+   measured entirely in em, so the mark follows the type down on its own and
+   needs no second set of numbers. */
+.wordmark { font-weight: 800; letter-spacing: -.03em; color: var(--ink); }
+.wordmark .wordmark-accent { color: var(--accent); }
+
+/* Logo mark: logo-mark.svg is favicon.svg with its viewBox extended way
+   down (0 0 210 400 instead of 0 0 210 210) so the image itself contains
+   more "$" than we ever show at rest — a hidden reservoir below the final
+   crop line. The image is sized taller than its container (which clips
+   the overflow), so at rest we only see the top portion; the container
+   is the fixed "window" and a tiny top margin on the image is reserved as
+   overshoot headroom, not part of the artwork.
+   On load the image slides up from fully below the window (like a card
+   emerging from a slit in a sheet of paper). The bounce overshoots
+   upward past its resting spot, which pulls MORE of the reservoir into
+   view at the bottom of the window for a moment, then settles back down
+   to the final (smaller) crop — never touching the top margin enough to
+   clip the statue.
+   Kept inline (not flex) so "House Staff Salaries" still wraps normally
+   as text on narrow screens instead of breaking apart into flex items. */
+.logo-mark {
+  display: inline-block;
+  width: 1.3em;
+  height: 1.85em;
+  overflow: hidden;
+  position: relative;
+  vertical-align: -0.4em;
+  margin-right: .35em;
+}
+.logo-mark-img {
+  /* The mark is chrome, not a picture to take away. draggable="false" on the
+     element covers every browser; -webkit-user-drag is the matching CSS for
+     WebKit, which honours it independently of the attribute. */
+  -webkit-user-drag: none;
+  position: absolute;
+  width: 1.34em;
+  height: 2.476em;
+  left: -0.02em;
+  top: 0.12em;
+  animation: logoRevealUp 620ms linear 150ms both;
+}
+/* Every keyframe carries its own timing-function (the curve for the
+   segment FROM that keyframe TO the next). A single shared easing
+   applied to the whole animation makes each leg of the bounce move at
+   the same rhythm, which is what reads as a cheap slide-in — real
+   springs snap up fast then decay through shrinking, slowing wobbles. */
+@keyframes logoRevealUp {
+  0%   { transform: translateY(2.2em); animation-timing-function: cubic-bezier(.16, 1, .3, 1); }
+  58%  { transform: translateY(-0.1em); animation-timing-function: cubic-bezier(.4, 0, .6, 1); }
+  76%  { transform: translateY(0.035em); animation-timing-function: cubic-bezier(.4, 0, .6, 1); }
+  90%  { transform: translateY(-0.012em); animation-timing-function: cubic-bezier(.4, 0, .6, 1); }
+  100% { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-mark-img { animation: none; transform: translateY(0); }
+}
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--line);
+}
+.hero-stat {
+  padding: 18px 24px 18px 0;
+}
+.hero-stat-num {
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: -.03em;
+  color: var(--ink);
+  line-height: 1.85rem;
+  height: 1.85rem;
+  margin-bottom: 5px;
+  white-space: nowrap;
+}
+.hero-stat-num .prefix { font-size: .7em; margin-right: 0.5px; letter-spacing: 0; }
+.hero-stat-label { font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: var(--ink3); }
+.hero-stat-sub { font-size: .65rem; color: var(--ink3); margin-top: 2px; }
+
+/* ── Layout ── */
+.body-grid {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  min-height: calc(100vh - 300px);
+}
+.body-grid > * { min-width: 0; }
+
+/* ── Left: lookup ── */
+.lookup {
+  padding: 40px 36px;
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.lookup-heading {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+.pos-input-wrap { position: relative; }
+.pos-placeholder {
+  position: absolute; inset: 0;
+  padding: 12px 16px;
+  font-size: .95rem; color: var(--ink3);
+  pointer-events: none; user-select: none;
+  white-space: nowrap; overflow: hidden;
+  display: flex; align-items: center; gap: 0;
+}
+.pos-placeholder-hidden { display: none; }
+#pos-placeholder-word {
+  display: inline-block;
+  animation-fill-mode: both;
+  animation-duration: 350ms;
+  animation-timing-function: cubic-bezier(.4,0,.2,1);
+}
+@keyframes phOut { from { opacity:1; transform:translateY(0); } to { opacity:0; transform:translateY(8px); } }
+@keyframes phIn  { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+.ph-out { animation-name: phOut; }
+.ph-in  { animation-name: phIn; }
+
+.pos-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1.5px solid var(--line);
+  border-radius: 8px;
+  font-size: .95rem;
+  color: var(--ink);
+  background: var(--bg);
+  outline: none;
+  transition: border-color .15s;
+}
+.pos-input::placeholder { color: var(--ink3); }
+.pos-input:focus { border-color: var(--accent); }
+
+.pos-results { margin-top: 6px; display: flex; flex-direction: column; }
+.pos-row {
+  display: grid;
+  grid-template-columns: 1fr 72px 54px;
+  align-items: center;
+  padding: 11px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  column-gap: 8px;
+  transition: background .1s;
+}
+.pos-row:hover { background: var(--bg2); }
+.pos-row.active { background: var(--accent2); }
+.pos-row.pos-row-in { animation: staffRowIn 260ms ease-out both; }
+@media (prefers-reduced-motion: reduce) { .pos-row.pos-row-in { animation: none; } }
+.pos-row-name { font-size: .88rem; font-weight: 600; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pos-row-count { font-size: .75rem; color: var(--ink3); white-space: nowrap; text-align: right; }
+.pos-row-median { font-size: .88rem; font-weight: 800; color: var(--accent); white-space: nowrap; text-align: right; }
+
+/* ── Range card ── */
+.range-card {
+  background: var(--bg2);
+  border-radius: 10px;
+  padding: 24px 22px;
+}
+.range-card-title { font-size: 1.1rem; font-weight: 800; color: var(--ink); margin-bottom: 2px; }
+.range-card-sub { font-size: .78rem; color: var(--ink3); margin-bottom: 22px; }
+
+.range-bar-wrap { margin-bottom: 8px; }
+.range-bar-track {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--bg3);
+  position: relative;
+}
+.range-bar-fill {
+  position: absolute;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--accent);
+  opacity: .2;
+}
+.range-bar-needle {
+  position: absolute;
+  width: 3px;
+  height: 20px;
+  top: -5px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateX(-50%);
+}
+.range-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: .68rem;
+  color: var(--ink3);
+  margin-top: 5px;
+}
+
+.range-trio {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--line);
+}
+.range-trio-cell {
+  background: var(--bg);
+  padding: 16px 14px;
+}
+.range-trio-val {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: -.02em;
+}
+.range-trio-key {
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-top: 4px;
+}
+.range-min-max {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+  font-size: .75rem;
+  color: var(--ink3);
+}
+
+.mini-trend-wrap { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
+.mini-trend-heading { font-size: .65rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); margin-bottom: 8px; }
+.mini-ctrl-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.mini-pills { display: flex; gap: 2px; }
+.mini-pill, .mini-q {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  font-size: .68rem;
+  font-weight: 700;
+  color: var(--ink3);
+  cursor: pointer;
+  transition: all .12s;
+}
+.mini-pill.active, .mini-q.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mini-pill:not(.active):hover, .mini-q:not(.active):hover { border-color: var(--ink); color: var(--ink); }
+.mini-chart-wrap { position: relative; height: 234px; }
+.spark-dot { transition: fill 100ms ease, r 100ms ease; }
+.spark-dot.spark-dot-active { fill: var(--accent); r: 5; }
+
+/* ── Main trend quarter filter ── */
+.trend-q-row { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.trend-q-label { font-size: .72rem; font-weight: 700; color: var(--ink3); margin-right: 2px; }
+.trend-q {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  background: transparent;
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--ink3);
+  cursor: pointer;
+  transition: all .12s;
+}
+.trend-q.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.trend-q:not(.active):hover { border-color: var(--ink); color: var(--ink); }
+.trend-q-note { font-size: .75rem; color: #92400e; background: #fef3c7; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; line-height: 1.5; }
+.q4-notice { font-size: .78rem; color: #92400e; background: #fef3c7; padding: 10px 40px; line-height: 1.5; border-top: 1px solid #fde68a; }
+
+/* ── Global office-type filter ── */
+.type-filter-row {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 12px 40px; border-top: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 20; background: var(--bg);
+}
+.type-filter-row.is-stuck { border-bottom: 1px solid var(--line); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.type-filter-label { font-size: .72rem; font-weight: 700; color: var(--ink3); margin-right: 2px; text-transform: uppercase; letter-spacing: .04em; }
+.type-filter-btn {
+  position: relative; z-index: 2; /* paints over party-filter-inline's overlapping left edge */
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  background: transparent;
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--ink3);
+  cursor: pointer;
+  transition: all .12s;
+}
+.type-filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.type-filter-btn:not(.active):hover { border-color: var(--ink); color: var(--ink); }
+.type-filter-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+#inflation-toggle[aria-pressed="true"]:hover { border-color: var(--accent); color: #fff; }
+.filter-row-divider { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+/* Not italic: no EMH face ships one, so this was a browser-sheared roman.
+   Weight is the system's substitute for emphasis. */
+.inflation-note { font-size: .72rem; color: var(--ink3); font-weight: 500; }
+
+.range-staff-list { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+.range-staff-heading { font-size: .65rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); margin-bottom: 8px; }
+/* Fixed-width 3rd column, not auto — auto sizes to *that row's own* amount
+   text, so a shorter amount (or the "—" no-data placeholder) widened that
+   row's 1fr columns relative to its neighbors and shifted the office name
+   sideways, since each row is its own independent grid. */
+.range-staff-row { display: grid; grid-template-columns: 1fr 1fr 90px; gap: 6px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: .78rem; }
+.range-staff-row.range-staff-row-in { animation: staffRowIn 320ms ease-out both; animation-delay: calc(var(--i) * 18ms); }
+@keyframes staffRowIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .range-staff-row.range-staff-row-in { animation: none; } }
+.range-staff-row:last-of-type { border-bottom: none; }
+.range-staff-name { font-weight: 700; color: var(--ink); }
+.range-staff-office { color: var(--ink3); font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.range-staff-amt { font-weight: 800; color: var(--ink); text-align: right; white-space: nowrap; }
+.range-staff-more { font-size: .72rem; color: var(--ink3); padding-top: 8px; }
+
+.lookup-hint {
+  font-size: .85rem;
+  color: var(--ink3);
+  line-height: 1.7;
+}
+
+/* ── Right: tabs ── */
+.right-panel { display: flex; flex-direction: column; }
+
+.tab-nav {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  padding: 0 36px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.tab-nav::-webkit-scrollbar { display: none; }
+.tab-btn {
+  padding: 16px 0;
+  margin-right: 32px;
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-btn:hover:not(.active) { color: var(--ink); }
+
+.tab-pane { display: none; padding: 36px 36px; }
+.tab-pane.active { display: block; }
+
+.pane-label {
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 16px;
+}
+
+.chart-wrap { position: relative; height: 270px; }
+.chart-wrap.tall { height: 320px; }
+.chart-svg-wrap { width: 100%; height: 100%; }
+@keyframes barGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── Office type bars ── */
+.type-bars { display: flex; flex-direction: column; gap: 22px; }
+.type-row { display: flex; align-items: center; gap: 14px; }
+.type-label {
+  width: 100px;
+  flex-shrink: 0;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.type-label-sub { font-size: .7rem; font-weight: 400; color: var(--ink3); }
+.type-track-wrap { flex: 1; position: relative; height: 36px; display: flex; align-items: center; }
+.type-track { position: absolute; border-radius: 4px; }
+.type-bg { height: 6px; background: var(--bg3); left: 0; right: 0; }
+.type-iqr { height: 6px; background: var(--accent); opacity: .2; }
+.type-needle { width: 2px; height: 18px; background: var(--accent); transform: translateX(-50%); }
+.type-val { font-size: .85rem; font-weight: 800; color: var(--accent); width: 52px; text-align: right; }
+
+.type-subrows {
+  display: flex; flex-direction: column; gap: 10px;
+  margin: -6px 0 0 8px; padding-left: 8px;
+  border-left: 2px solid var(--bg3);
+}
+/* Label is narrowed by exactly the container's indent (8+8=16px) so the
+   track-wrap (and its bar) still starts at the same x as the parent rows. */
+.type-subrow .type-label { width: 84px; font-size: .74rem; font-weight: 600; color: var(--ink2); }
+.type-subrow .type-track-wrap { height: 28px; }
+.type-subrow .type-needle { height: 14px; }
+.type-subrow .type-val { font-size: .74rem; }
+
+/* ── Trend mode switcher ── */
+.trend-mode-row { display: flex; gap: 2px; margin-bottom: 16px; background: var(--bg3); border-radius: 8px; padding: 3px; width: fit-content; }
+.trend-mode {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--ink3);
+  cursor: pointer;
+  transition: all .15s;
+}
+.trend-mode.active { background: var(--bg); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.trend-mode:not(.active):hover { color: var(--ink); }
+
+/* ── Trend pills ── */
+.trend-pills { display: flex; gap: 6px; margin-bottom: 18px; }
+.pill {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  background: transparent;
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--ink3);
+  cursor: pointer;
+  transition: all .15s;
+}
+.pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pill:not(.active):hover { border-color: var(--ink); color: var(--ink); }
+
+/* ── Table ── */
+.table-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.t-input, .t-select {
+  padding: 8px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 6px;
+  font-size: .82rem;
+  color: var(--ink);
+  background: var(--bg);
+  outline: none;
+  transition: border-color .15s;
+}
+.t-input { flex: 1; min-width: 150px; }
+.t-input::placeholder { color: var(--ink3); }
+.t-input:focus, .t-select:focus { border-color: var(--accent); }
+
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; min-width: 560px; }
+thead th {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  border-bottom: 2px solid var(--ink);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+thead th:hover { color: var(--ink); }
+thead th.sorted { color: var(--accent); }
+.sort-icon { margin-left: 3px; opacity: .45; }
+thead th.sorted .sort-icon { opacity: 1; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--ink2); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--bg2); }
+.td-name { font-weight: 700; color: var(--ink); }
+.emp-row { cursor: pointer; }
+.th-chevron, .td-chevron { width: 16px; padding-left: 0; padding-right: 12px; }
+.emp-row-chevron { display: inline-block; font-size: 1rem; color: var(--ink3); transition: transform .15s; }
+.emp-row-chevron.open { transform: rotate(90deg); }
+.emp-detail-row { cursor: default; }
+.emp-detail-row:hover td { background: none; }
+.td-office { font-size: .75rem; color: var(--ink3); max-width: 200px; overflow: hidden; white-space: nowrap; }
+/* The ellipsis has to live on the name, not on the cell. .with-party-badge is
+   inline-flex, which makes it an atomic inline, so the cell's own
+   text-overflow could never reach inside it: the whole box simply overran the
+   200px cap and overflow: hidden sliced it, taking a bite out of the trailing
+   party badge. Same split the office list already uses, where the name
+   ellipsises and the badge keeps its full width beside it. */
+.td-office .with-party-badge { max-width: 100%; }
+.td-office-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.td-title { font-size: .78rem; color: var(--ink2); }
+/* Right-aligned so the figures line up on their own edge. Left-aligned, a
+   row carrying the over-cap warning pushed its amount sideways and broke
+   the column. tabular-nums is already on globally and only pays off here. */
+.td-amt { font-weight: 800; color: var(--ink); text-align: right; }
+/* Header follows the column, but keeps its own weight and colour. */
+th[data-sort="annual_equiv"] { text-align: right; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.badge-member         { background: #ffddc2; color: #92310a; }
+.badge-committee      { background: #f5dde6; color: #8a3b57; }
+.badge-leadership     { background: #fef08a; color: #713f12; }
+.badge-administrative { background: #f3f4f6; color: #4b5563; }
+.badge-intern         { background: #fce7f3; color: #9d174d; }
+.badge-shared         { background: #f3f4f6; color: #6b7280; }
+
+.party-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  font-size: .6rem; font-weight: 800; line-height: 1;
+  color: #fff; flex-shrink: 0; margin-left: 5px;
+}
+/* Wraps a name/office string plus its trailing .party-badge so the badge
+   centers on the text's actual visual height via flex alignment instead of
+   vertical-align/transform hacks, which drift off-center at other font sizes. */
+.with-party-badge { display: inline-flex; align-items: center; }
+.party-badge-d { background: #2563eb; }
+.party-badge-r { background: #dc2626; }
+.party-badge-i { background: #7c3aed; font-feature-settings: "cv08" 1; }
+
+.party-filter-inline {
+  position: relative; z-index: 1; /* sits under the type button it's attached to (see .type-filter-btn) */
+  display: none; align-items: center; gap: 4px;
+  padding: 3px 6px 3px 26px;
+  /* Square left corners, not rounded — a rounded pill overlapping another
+     rounded pill always leaves a lens-shaped gap between the two curves no
+     matter how far they overlap. A flat left edge tucks fully flush under
+     the button's own curve instead. */
+  border-radius: 0 20px 20px 0; background: var(--bg3);
+  margin-left: -20px; /* reaches past the type button's own right-side curve */
+}
+.party-filter-inline.visible { display: inline-flex; }
+.party-filter-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--bg);
+  font-size: .64rem; font-weight: 800; color: var(--ink3); cursor: pointer;
+}
+.party-filter-btn.active.party-filter-all { background: var(--accent); border-color: var(--accent); color: #fff; }
+.party-filter-btn.active.party-filter-d { background: #2563eb; border-color: #2563eb; color: #fff; }
+.party-filter-btn.active.party-filter-r { background: #dc2626; border-color: #dc2626; color: #fff; }
+.party-filter-btn.party-filter-i { font-feature-settings: "cv08" 1; }
+.party-filter-btn.active.party-filter-i { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+.party-filter-btn.party-filter-i-hidden { display: none; }
+
+.table-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: .78rem; color: var(--ink3); }
+.pagination { display: flex; gap: 3px; }
+.page-btn {
+  padding: 4px 9px;
+  border: 1.5px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  font-size: .78rem;
+  color: var(--ink3);
+  transition: all .15s;
+}
+.page-btn:hover, .page-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+
+/* ── Office list ── */
+.office-toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.office-list { display: flex; flex-direction: column; }
+.office-row {
+  display: grid;
+  grid-template-columns: 1fr 96px 72px minmax(116px, max-content) 16px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background .1s;
+  border-radius: 4px;
+}
+.office-row:hover { background: var(--bg2); padding-left: 6px; padding-right: 6px; margin: 0 -6px; }
+.office-row:last-child { border-bottom: none; }
+.office-name { font-size: .88rem; font-weight: 700; color: var(--ink); min-width: 0; display: flex; align-items: center; }
+.office-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* badge column: fixed width, right-align so all badges share a right edge */
+.office-row .badge { justify-self: end; }
+/* count: number right-aligns, " staff" label anchors it */
+.office-count { font-size: .75rem; color: var(--ink3); white-space: nowrap; display: flex; justify-content: flex-end; }
+.office-count-num { text-align: right; min-width: 2.2ch; }
+.office-count-label { flex-shrink: 0; }
+/* range: right-aligned, on a track that grows past its 116px floor rather
+   than letting the cell overflow. Sorting by tenure puts "3.5 yrs MEDIAN
+   TENURE" in here, roughly 165px of nowrap text, and a grid item never
+   shrinks below its own min-content width. So a fixed 116px track did not
+   contain it: the cell spilled rightward across the gap and printed on top
+   of the chevron. minmax() sizes the track to the widest cell instead, and
+   every row still shares one right edge. */
+.office-range { font-size: .88rem; font-weight: 700; color: var(--ink); white-space: nowrap; text-align: right; }
+.office-range-sep { color: var(--ink3); font-weight: 400; margin: 0 2px; }
+.office-range-tag { color: var(--ink3); font-weight: 400; font-size: .72rem; margin-left: 5px; text-transform: uppercase; letter-spacing: .02em; }
+.office-chevron { font-size: 1rem; color: var(--ink3); transition: transform .15s; }
+
+.office-detail { background: var(--bg2); border-radius: 8px; margin: 4px 0 10px; padding: 16px 18px; }
+.office-detail-member-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.office-detail-photo { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.office-detail-member-name { font-weight: 800; font-size: .95rem; color: var(--ink); display: flex; align-items: center; }
+.office-detail-member-meta { font-size: .78rem; color: var(--ink3); margin-top: 2px; }
+.office-detail-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 0; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--line); }
+.office-detail-stat { background: var(--bg); padding: 12px 14px; }
+.office-detail-val { font-size: 1.1rem; font-weight: 800; color: var(--accent); }
+.office-detail-key { font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--ink3); margin-top: 3px; }
+.office-staff-list { display: flex; flex-direction: column; gap: 0; }
+.office-staff-row { display: grid; grid-template-columns: 1fr 1fr 90px; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: .82rem; }
+.office-staff-row:last-of-type { border-bottom: none; }
+.office-staff-name { font-weight: 700; color: var(--ink); }
+.office-staff-title { color: var(--ink3); font-size: .78rem; }
+.office-staff-amt { font-weight: 800; color: var(--ink); text-align: right; white-space: nowrap; }
+
+/* ── Dollar figures ───────────────────────────────────────────────────────
+   Currency only. Not staff counts, not tenure in years, not quarter labels,
+   not the labels sitting beside any of them. Carried by an explicit class
+   rather than by restyling the amount classes, because several of those are
+   shared: .hero-stat-num also sets the staff count and the quarter nav, and
+   .office-range holds "3.5 yrs" when the list is sorted by tenure.
+
+   weight 700 is stated because EMH Mono stops there. Most of these sites are
+   800, and leaving 800 in place would have the browser synthesize a weight
+   the face does not have, which is the failure this type system exists to
+   avoid.
+
+   font-size-adjust does the optical correction without touching a single
+   font-size. Mono's x-height is 0.525 em against Grotesk's 0.546, so matched
+   font-size sets visibly smaller; pinning the ratio to Grotesk's own value
+   scales Mono up by the 1.040 that closes the gap, at whatever size each
+   call site happens to declare. It is inherited, but it is a no-op on any
+   Grotesk child, since that is Grotesk's own ratio.
+
+   This rule sits after every amount class it overrides. It matches them on
+   equal specificity, so source order is what decides it. */
+.money {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size-adjust: 0.546;
+  letter-spacing: normal;
+}
+/* Chart labels are small, grey and set no weight of their own, so they were
+   rendering at 400 before this. .money's 700 made them shout over the plot
+   they annotate. Currency in SVG keeps the face and goes back to regular. */
+text.money, tspan.money { font-weight: 400; }
+/* The tag is a label, so it stays in Grotesk even inside a .money cell. */
+.office-range-tag { font-family: var(--font-sans); }
+.office-staff-more { font-size: .75rem; color: var(--ink3); padding-top: 8px; }
+.office-detail-empty { font-size: .82rem; color: var(--ink3); }
+
+/* ── Person links ── */
+.person-link { cursor: pointer; color: inherit; text-decoration: none; }
+.person-link:hover { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+
+/* ── Office links ── */
+.office-link { cursor: pointer; color: inherit; text-decoration: none; }
+.office-link:hover { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+.title-link { cursor: pointer; color: inherit; text-decoration: none; }
+.title-link:hover { text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+
+/* ── Employee detail (inline, in table tab) ── */
+.emp-detail { background: var(--bg2); border-radius: 8px; margin: 4px 0; padding: 16px 18px; }
+.emp-detail-name { font-size: 1.2rem; font-weight: 800; color: var(--ink); letter-spacing: -.02em; }
+.emp-detail-meta { font-size: .8rem; color: var(--ink3); margin-top: 2px; }
+.emp-detail-header-row { display: flex; align-items: center; gap: 12px; }
+.emp-detail-photo { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.emp-detail-salary-row { display: flex; align-items: center; gap: 10px; margin: 14px 0 2px; flex-wrap: wrap; }
+.emp-detail-salary {
+  font: inherit; font-size: 1.6rem; font-weight: 800; color: var(--ink); letter-spacing: -.03em;
+  background: none; border: none; border-bottom: 2px dashed transparent; border-radius: 4px; padding: 0 2px; margin: 0 -2px;
+  cursor: pointer; transition: border-color .15s, background .15s;
+  display: inline-flex; align-items: baseline; gap: 6px;
+}
+.emp-detail-salary:hover, .emp-detail-salary:focus-visible { border-color: var(--accent); }
+.ed-salary-pencil { font-size: .95rem; color: var(--ink3); display: inline-flex; align-items: center; }
+/* Sized in em, so both marks track whatever text they sit in. The warning
+   rides a little larger than its 0.68rem chip text, which otherwise leaves
+   the triangle too small to read as one. */
+.icon { width: 1em; height: 1em; flex-shrink: 0; }
+.cap-warn .icon-warn { width: 1.2em; height: 1.2em; }
+.emp-detail-salary:hover .ed-salary-pencil { color: var(--accent); }
+.emp-detail-salary-sub { font-size: .75rem; color: var(--ink3); margin-bottom: 14px; }
+.ed-salary-input-wrap {
+  border-bottom: 2px solid var(--accent) !important;
+  background: var(--accent2); padding: 0 4px; cursor: text;
+}
+.ed-salary-prefix { color: var(--ink); }
+.ed-salary-input {
+  font: inherit; font-size: inherit; font-weight: inherit; letter-spacing: inherit;
+  border: none; background: none; outline: none; padding: 0; margin: 0 0 0 1px; width: 8ch; cursor: text;
+  /* This page has no dark theme, but some browsers auto-dark-style bare
+     native <input> text/background based on the OS preference regardless
+     of author CSS — opting into "light" here stops that from silently
+     making the typed digits invisible against the pale accent background. */
+  color-scheme: light;
+  color: var(--ink) !important;
+  -webkit-text-fill-color: var(--ink);
+}
+.ed-salary-input::placeholder { color: var(--ink3); opacity: 1; -webkit-text-fill-color: var(--ink3); }
+/* Password-manager extensions (1Password, LastPass, Bitwarden, etc.) can
+   inject their own icon/overlay into a bare text input, which visually
+   "greys it out" and can swallow clicks/keystrokes meant for the field
+   itself. The data-*ignore attributes on the element ask well-behaved
+   extensions not to touch it; this hides the browser's own native
+   autofill icons as a second layer of defense. */
+.ed-salary-input::-webkit-credentials-auto-fill-button,
+.ed-salary-input::-webkit-strong-password-auto-fill-button,
+.ed-salary-input::-webkit-caps-lock-indicator,
+.ed-salary-input::-webkit-contacts-auto-fill-button {
+  display: none !important; visibility: hidden; pointer-events: none; position: absolute; right: 0;
+}
+.ed-salary-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: .68rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--accent); background: var(--accent2);
+  padding: 3px 6px 3px 10px; border-radius: 20px;
+}
+.ed-salary-reset {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  cursor: pointer; color: #fff; background: var(--accent); font-size: .6rem; line-height: 1;
+}
+.ed-salary-reset:hover { opacity: .8; }
+.emp-detail-comp-you-hypo { outline: 1.5px dashed var(--accent); outline-offset: -1.5px; }
+.emp-detail-prev { font-size: .8rem; color: var(--ink2); margin-top: 12px; line-height: 1.6; }
+.emp-detail-prev-until { color: var(--ink3); font-size: .75rem; }
+.emp-detail-yoy { font-size: .85rem; margin: 4px 0 16px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.emp-detail-yoy-label { font-size: .75rem; color: var(--ink3); }
+.emp-detail-section { font-size: .65rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); margin: 18px 0 10px; }
+/* Section heading with a control parked on its right (the tenure metric
+   toggle). The row owns the heading's vertical margins so the two don't
+   stack; the heading keeps its own margins when used standalone. */
+.emp-detail-section-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 18px 0 10px; }
+.emp-detail-section-row .emp-detail-section { margin: 0; }
+.emp-detail-chart { height: 234px; margin-bottom: 4px; }
+.emp-detail-comp-row { display: flex; justify-content: space-between; align-items: center; font-size: .85rem; padding: 6px 0; border-bottom: 1px solid var(--line); color: var(--ink2); }
+.emp-detail-comp-row:last-child { border-bottom: none; }
+.emp-detail-comp-you { font-weight: 800; color: var(--ink); background: var(--accent2); margin: 0 -8px; padding: 6px 8px; border-radius: 4px; }
+.person-missing {
+  margin-bottom: 12px; padding: 10px 14px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--paper, transparent);
+  font-size: .85rem; color: var(--ink2);
+}
+
+/* Opt-out. Kept visually quiet so it doesn't compete with the data above it,
+   but on every card rather than hidden in a policy page. */
+.emp-detail-optout { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); }
+.ed-optout-open {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font-size: .78rem; color: var(--ink3); text-decoration: underline;
+  text-underline-offset: 3px; text-decoration-color: var(--line);
+}
+.ed-optout-open:hover, .ed-optout-open.open { color: var(--ink2); text-decoration-color: currentColor; }
+.ed-optout-panel { margin-top: 12px; font-size: .8rem; color: var(--ink2); line-height: 1.6; }
+.ed-optout-panel p { margin: 0 0 10px; }
+.ed-optout-form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.ed-optout-input {
+  flex: 1 1 15rem; min-width: 0; padding: 7px 10px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font-size: .82rem; font-family: inherit;
+}
+.ed-optout-input:focus { outline: none; border-color: var(--accent); }
+.ed-optout-submit {
+  padding: 7px 14px; border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--accent); color: #fff; font-size: .78rem; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+}
+.ed-optout-submit:disabled { opacity: .55; cursor: default; }
+/* Honeypot: off-screen rather than display:none, which some bots skip. */
+.ed-optout-hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.ed-optout-msg { margin-top: 12px; font-size: .8rem; line-height: 1.6; }
+.ed-optout-ok { color: var(--ink2); }
+.ed-optout-err { color: #b3261e; }
+@media (prefers-color-scheme: dark) { .ed-optout-err { color: #f2b8b5; } }
+.ed-optout-manual {
+  display: inline; background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px;
+}
+
+.emp-comp-title-link { color: var(--ink2); cursor: pointer; border-bottom: 1px dashed var(--ink3); }
+.emp-comp-title-link:hover { color: var(--ink); border-color: var(--ink); }
+/* Steps the comparison back one title. Sits inside the uppercase, letter-
+   spaced section heading, so it cancels that inherited spacing — the arrow
+   glyph would otherwise sit off-centre in its own box. */
+.ed-comp-undo {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink3);
+  font-size: .78rem;
+  line-height: 1.5;
+  letter-spacing: 0;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: all .12s;
+}
+.ed-comp-undo:hover { border-color: var(--ink); color: var(--ink); }
+
+.ed-comp-wrap { position: relative; margin: -4px 0 14px; }
+.ed-comp-input {
+  width: 100%; box-sizing: border-box;
+  font-size: .85rem; padding: 9px 12px;
+  border: 1.5px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink);
+  outline: none; transition: border-color .15s;
+}
+.ed-comp-input::placeholder { color: var(--ink3); }
+.ed-comp-input:focus { border-color: var(--accent); }
+.ed-comp-results {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+  background: var(--bg); border: 1.5px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.08);
+  max-height: 220px; overflow-y: auto; display: none;
+}
+.ed-comp-result {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 9px 12px; font-size: .82rem; color: var(--ink2);
+  cursor: pointer; border-bottom: 1px solid var(--line);
+}
+.ed-comp-result:last-child { border-bottom: none; }
+.ed-comp-result:hover { background: var(--bg2); color: var(--ink); }
+.ed-comp-result-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ed-comp-result-med { flex-shrink: 0; font-size: .75rem; color: var(--ink3); }
+.ed-comp-allstaff {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 9px 12px; font-size: .82rem; font-weight: 700; color: var(--ink);
+  cursor: pointer; border: 1.5px solid var(--line); border-radius: 8px; margin-bottom: 8px;
+  background: var(--bg2);
+}
+.ed-comp-allstaff:hover { border-color: var(--accent); }
+
+/* ── Office total payroll ── */
+.office-total-payroll { font-size: .75rem; color: var(--ink3); margin: 10px 0 4px; }
+.office-total-payroll strong { color: var(--ink); }
+
+/* ── Salary cap warning ── */
+.cap-warn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: .68rem;
+  font-weight: 700;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* ── Suggestion drawer ── */
+.hero-top {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+}
+#suggest-fab {
+  flex-shrink: 0; margin-top: 4px;
+  background: none; color: var(--ink3);
+  border: 1.5px solid var(--line); border-radius: 20px;
+  padding: 6px 14px; font-size: .75rem; font-weight: 600; letter-spacing: .02em;
+  cursor: pointer; white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+#suggest-fab:hover { color: var(--ink); border-color: var(--ink3); }
+
+.suggest-overlay {
+  position: fixed; inset: 0; z-index: 210;
+  background: rgba(0,0,0,.35);
+}
+
+.suggest-drawer {
+  position: fixed; z-index: 220;
+  background: var(--bg); box-shadow: -4px 0 32px rgba(0,0,0,.12);
+  display: flex; flex-direction: column;
+  /* desktop: right panel */
+  top: 0; right: 0; bottom: 0; width: 360px;
+  transform: translateX(100%);
+  transition: transform .28s cubic-bezier(.4,0,.2,1);
+  overflow-y: auto;
+}
+.suggest-drawer.open { transform: translateX(0); }
+
+.suggest-drawer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: var(--bg); z-index: 1;
+}
+.suggest-drawer-title { font-size: .95rem; font-weight: 700; color: var(--ink); }
+.suggest-drawer-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 1.4rem; line-height: 1; color: var(--ink3); padding: 0 2px;
+}
+.suggest-drawer-close:hover { color: var(--ink); }
+
+.suggest-form { padding: 22px; display: flex; flex-direction: column; gap: 6px; }
+.suggest-label { font-size: .75rem; font-weight: 600; color: var(--ink2); }
+.suggest-req { color: var(--accent); }
+.suggest-opt { font-weight: 400; color: var(--ink3); }
+.suggest-textarea, .suggest-input {
+  width: 100%; border: 1.5px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; font-size: .875rem; color: var(--ink);
+  background: var(--bg); outline: none; resize: vertical;
+  transition: border-color .15s;
+}
+.suggest-textarea:focus, .suggest-input:focus { border-color: var(--accent); }
+.suggest-textarea { margin-bottom: 10px; }
+.suggest-input { margin-bottom: 4px; }
+.suggest-hp { position: absolute; left: -9999px; opacity: 0; height: 0; }
+.suggest-error { font-size: .78rem; color: var(--accent); margin-top: 4px; }
+.suggest-submit {
+  margin-top: 14px; background: var(--accent); color: #fff;
+  border: none; border-radius: 8px; padding: 11px 0;
+  font-size: .875rem; font-weight: 700; cursor: pointer;
+  transition: background .15s;
+}
+.suggest-submit:hover:not(:disabled) { background: #a93226; }
+.suggest-submit:disabled { opacity: .5; cursor: default; }
+
+.suggest-consent { font-size: .72rem; color: var(--ink3); margin-top: 10px; }
+.suggest-privacy-link { color: var(--ink3); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.suggest-privacy-link:hover { color: var(--ink); }
+
+.suggest-data-modal {
+  position: fixed; inset: 0; z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+}
+.suggest-data-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,.45);
+}
+.suggest-data-box {
+  position: relative; z-index: 1;
+  background: var(--bg); border-radius: 12px;
+  padding: 28px 28px 24px;
+  max-width: 380px; width: calc(100% - 40px);
+  box-shadow: 0 8px 40px rgba(0,0,0,.18);
+}
+.suggest-data-close {
+  position: absolute; top: 14px; right: 16px;
+  background: none; border: none; cursor: pointer;
+  font-size: 1.3rem; line-height: 1; color: var(--ink3); padding: 2px;
+}
+.suggest-data-close:hover { color: var(--ink); }
+.suggest-data-title { font-size: 1rem; font-weight: 800; color: var(--ink); margin-bottom: 14px; letter-spacing: -.02em; }
+.suggest-data-p { font-size: .82rem; color: var(--ink2); line-height: 1.6; margin-bottom: 10px; }
+.suggest-data-list { font-size: .82rem; color: var(--ink2); line-height: 1.7; padding-left: 20px; margin-bottom: 10px; }
+.suggest-data-box a { color: var(--accent); text-decoration: none; }
+.suggest-data-box a:hover { text-decoration: underline; }
+
+.suggest-success {
+  padding: 48px 22px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.suggest-success-icon { font-size: 2rem; color: #059669; }
+.suggest-success-msg { font-size: .95rem; font-weight: 600; color: var(--ink); }
+
+@media (max-width: 640px) {
+  .suggest-drawer {
+    top: auto; right: 0; left: 0; bottom: 0; width: 100%;
+    height: 85vh; border-radius: 14px 14px 0 0;
+    transform: translateY(100%);
+    box-shadow: 0 -4px 32px rgba(0,0,0,.12);
+  }
+  .suggest-drawer.open { transform: translateY(0); }
+}
+
+/* ── Footer ── */
+.site-footer { border-top: 1px solid var(--line); padding: 20px 40px; }
+.site-footer-primary {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 0;
+  font-size: .72rem; color: var(--ink3);
+}
+.site-footer-brand { font-size: .82rem; }
+/* The reveal is a header moment. A second copy of it playing in the footer,
+   usually below the fold, is animation nobody asked to watch. */
+.site-footer-brand .logo-mark-img { animation: none; }
+.site-footer-sep { margin: 0 8px; }
+.site-footer-copy { color: var(--ink3); }
+.site-footer-link { color: var(--ink3); text-decoration: none; }
+.site-footer-link:hover { color: var(--ink); }
+.footer-profile-link { color: var(--ink3); display: inline-flex; vertical-align: -2px; }
+.footer-profile-link:hover { color: var(--accent); }
+.footer-profile-photo { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; vertical-align: -4px; margin-right: 1px; }
+.site-footer-secondary {
+  margin-top: 8px; font-size: .68rem; color: var(--ink3); line-height: 1.5;
+}
+.site-footer-secondary a { color: var(--ink3); text-decoration: underline; text-underline-offset: 2px; }
+.footer-note { display: inline; }
+
+/* ── Error ── */
+.error-msg { padding: 40px; color: var(--accent); font-size: .9rem; }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  nav { padding: 16px 20px; }
+  .hero { padding: 20px 20px 0; }
+  .hero-stats { grid-template-columns: 1fr 1fr; }
+  .body-grid { grid-template-columns: 1fr; }
+  .lookup { border-right: none; border-bottom: 1px solid var(--line); padding: 28px 20px; }
+  .tab-pane { padding: 24px 20px; }
+  .tab-nav { padding: 0 20px; }
+  .site-footer { padding: 16px 20px; }
+  .q4-notice { padding: 10px 20px; }
+  .type-filter-row { padding: 10px 20px; }
+}
+
+@media (max-width: 640px) {
+  .hero-title { margin-bottom: 8px; }
+  .hero-stat { padding: 14px 12px 14px 0; }
+  .hero-stat-num { font-size: 1.3rem; }
+  .lookup { padding: 22px 16px; gap: 22px; }
+  .tab-pane { padding: 20px 16px; }
+  .tab-nav { padding: 0 16px; }
+  .site-footer { padding: 16px; }
+  .q4-notice { padding: 10px 16px; font-size: .74rem; }
+  .type-filter-row { padding: 10px 16px; }
+  .range-card { padding: 18px 16px; }
+  .range-trio { grid-template-columns: 1fr; }
+  .range-trio-cell { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; }
+  .range-trio-key { margin-top: 0; }
+  .office-toolbar, .table-bar { flex-direction: column; align-items: stretch; }
+  .office-toolbar .t-input, .office-toolbar .t-select,
+  .table-bar .t-input, .table-bar .t-select { max-width: none !important; width: 100%; }
+
+  /* Office rows: name takes the full first line, badge/count/range/chevron wrap onto a second line */
+  .office-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+  }
+  .office-name { flex: 1 1 100%; }
+  .office-name-text { white-space: normal; overflow: visible; text-overflow: clip; }
+  .office-row .badge { justify-self: unset; order: 1; }
+  .office-count { order: 2; }
+  .office-range { order: 3; }
+  .office-chevron { order: 4; margin-left: auto; }
+
+  .range-staff-row, .office-staff-row { grid-template-columns: 1fr; row-gap: 2px; }
+  .range-staff-amt, .office-staff-amt { text-align: left; }
+  .range-staff-office, .office-staff-title { white-space: normal; }
+}
+
+@media (max-width: 420px) {
+  .hero-stats { grid-template-columns: 1fr; }
+  .hero-stat { border-bottom: 1px solid var(--line); padding: 12px 0; }
+  .hero-stat:last-child { border-bottom: none; }
+}

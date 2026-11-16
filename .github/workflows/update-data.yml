@@ -1,0 +1,53 @@
+name: Update SOD Data
+
+on:
+  schedule:
+    # Weekly rather than quarterly. The House posts a Statement of
+    # Disbursements roughly two months after the quarter ends, on no fixed
+    # date — in practice a Friday late in the month. A four-times-a-year cron
+    # had to guess that date, and any posting that slipped past a run date
+    # left the site stale until the next one, up to three months later.
+    # A weekly check costs ~90s of CI and bounds staleness at seven days;
+    # runs that find nothing new write no commit.
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+  # An opt-out confirmation commits to data/suppressed.json, but data/*.json
+  # are committed build artifacts — the person stays in the published files
+  # until fetch_sod.py re-runs and filters them out. Without this trigger the
+  # opt-out would sit recorded but unapplied until the next quarterly run.
+  push:
+    paths:
+      - "data/suppressed.json"
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Discover new quarters, fetch and process SOD data
+        # SUPPRESSION_PEPPER keys the opt-out digests in data/suppressed.json.
+        # Without it the build cannot tell who opted out, so it fails rather
+        # than quietly republishing them (see apply_suppressions).
+        env:
+          SUPPRESSION_PEPPER: ${{ secrets.SUPPRESSION_PEPPER }}
+        run: python scripts/fetch_sod.py
+
+      - name: Commit updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ scripts/fetch_sod.py
+          if git diff --staged --quiet; then
+            echo "No data changes."
+          else
+            git commit -m "Update SOD salary data $(date +%Y-%m-%d)"
+            git push
+          fi

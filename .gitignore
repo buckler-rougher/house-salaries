@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.DS_Store
+serve.sh
+
+# Agent instructions: local only. These deploy to the site root and are
+# served publicly — house-floor was exposing its deploy rules at /CLAUDE.md.
+CLAUDE.md
+AGENTS.md
+
+# Local secrets, never committed
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+!.dev.vars.example
+
+# Wrangler's local cache names the Cloudflare account, and Pages would serve it
+.wrangler/
