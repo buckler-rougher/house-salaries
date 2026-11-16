@@ -1152,7 +1152,13 @@ text.money, tspan.money { font-weight: 400; }
 /* ── Footer ── */
 .site-footer { border-top: 1px solid var(--line); padding: 20px 40px; }
 .site-footer-primary {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 0;
+  /* baseline, not center. The brand carries the logo mark, which stands
+     1.85em tall and hangs 0.4em below the baseline, so its box is roughly
+     twice the height of the text beside it. Centering boxes of different
+     heights lines up their middles, which leaves the wordmark sitting off
+     the line the copyright and the links sit on. Aligning on the baseline
+     puts all of the type on one line and lets the mark overhang it. */
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 0;
   font-size: .72rem; color: var(--ink3);
 }
 .site-footer-brand { font-size: .82rem; }
