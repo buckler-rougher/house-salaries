@@ -98,7 +98,7 @@ function memberPhotoHeaderHtml(party, officeName) {
   if (!party?.bioguide) return "";
   const url = `https://bioguide.congress.gov/bioguide/photo/${party.bioguide[0]}/${party.bioguide}.jpg`;
   return `<div class="office-detail-member-header">
-    <img class="office-detail-photo" src="${url}" alt="${esc(officeName)}" loading="lazy" onerror="this.parentElement.remove()">
+    <img class="office-detail-photo" src="${url}" alt="${esc(officeName)}" decoding="sync" onerror="this.parentElement.remove()">
     <div>
       <div class="office-detail-member-name">${esc(officeName)}${officePartyBadge({ type: "member", party })}</div>
       <div class="office-detail-member-meta">${esc(party.state)}${party.district ? "-" + esc(party.district.slice(party.state.length) || party.district) : ""}</div>
