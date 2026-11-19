@@ -90,7 +90,17 @@ def classify_office(org):
     s = re.sub(r"^\d{4}\s+", "", org.upper())
     if s.startswith("HON.") or "REPRESENTATIVE" in s:
         return "member"
-    if "COMMITTEE" in s:
+    # The SOD abbreviates committee names whenever the field runs long, and
+    # it is not consistent about how: "COMM ON ENERGY & COMMERCE-MIN",
+    # "COMM-EDUCATION&WORKFORCE-MIN", "SEL COMM-COMPETITION US&CHINA",
+    # "SELECT COMM - CLIMATE CRISIS". A plain "COMMITTEE" substring misses
+    # every one of those, so 16 committee offices were being filed as
+    # administrative, minority and select committees worst of all.
+    # \bCOMM\b catches the abbreviation without touching COMMUNICATIONS or
+    # COMMISSION, and a hyphen counts as a word boundary so the "COMM-" forms
+    # match too. Checked against every office and staff name in the data:
+    # these 16 change and nothing else does.
+    if re.search(r"\bCOMMITTEE\b|\bSUBCOMMITTEE\b|\bCOMM\b|\bSUBCOMM\b", s):
         return "committee"
     if any(x in s for x in ["SPEAKER", "MAJORITY LEADER", "MINORITY LEADER",
                               "MAJORITY WHIP", "MINORITY WHIP", "REPUBLICAN CONFERENCE",
